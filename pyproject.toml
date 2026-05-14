@@ -1,0 +1,19 @@
+# project.toml - minimal project metadata
+# Edit fields as needed for your project.
+
+[project]
+name = "sicurre-ml"
+version = "0.1.0"
+description = "Machine learning project for Sicurre"
+authors = [{ name = "Michael Adebayo" }]
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = [
+  "python>=3.10",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "scikit-learn>=1.2",
+]
+
+[tool.project]
+# Tool-specific configuration can go here.
