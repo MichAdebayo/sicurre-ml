@@ -13,3 +13,16 @@ docs/
 .ruff_cache/
 .pytest_cache/
 .mypy_cache/
+
+.vscode/extensions.json
+.DS_Store
+
+sicurre-*.ipynb
+sicurre-*.md
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+.vscode/
+docs/
+tasks/

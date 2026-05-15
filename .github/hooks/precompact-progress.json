@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "type": "command",
+        "command": "uv run python .github/scripts/hooks/precompact_progress.py",
+        "timeout": 15
+      }
+    ]
+  }
+}

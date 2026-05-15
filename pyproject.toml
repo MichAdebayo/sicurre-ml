@@ -1,20 +1,52 @@
-# project.toml - minimal project metadata
-# Edit fields as needed for your project.
-
 [project]
 name = "sicurre-ml"
 version = "0.1.0"
-description = "Machine learning project for Sicurre"
+description = "ML training pipeline for Sicurre"
 authors = [{ name = "Michael Adebayo" }]
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.14"
+requires-python = ">=3.11,<3.13"
 dependencies = [
-  "python>=3.10",
+  "accelerate>=1.1",
+  "datasets>=3.0",
+  "evaluate>=0.4",
+  "huggingface-hub>=0.32",
+  "matplotlib>=3.9",
+  "mlflow-skinny>=3.0",
   "numpy>=1.24",
+  "optuna>=4.0",
   "pandas>=2.0",
+  "python-dotenv>=1.0",
   "scikit-learn>=1.2",
+  "seaborn>=0.13",
+  "sentencepiece>=0.2",
+  "torch>=2.2",
+  "transformers>=4.50",
 ]
 
-[tool.project]
-# Tool-specific configuration can go here.
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.23",
+  "mypy>=1.15",
+  "ruff>=0.11",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/integration", "tests/e2e"]
+addopts = ["-p", "no:langsmith", "-p", "no:langsmith_plugin"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", ".github/scripts", "tests"]
+warn_unused_configs = true
+ignore_missing_imports = true
