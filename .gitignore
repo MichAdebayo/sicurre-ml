@@ -11,3 +11,7 @@ tasks/
 
 sicurre-*.ipynb
 sicurre-*.md
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
