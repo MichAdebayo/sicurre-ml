@@ -3,3 +3,11 @@
 __pycache__/
 *.pyc
 *.pyo
+
+docs/
+tasks/
+.vscode/
+.DCS_Store
+
+sicurre-*.ipynb
+sicurre-*.md
