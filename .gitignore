@@ -3,22 +3,16 @@
 __pycache__/
 *.pyc
 *.pyo
-.vscode/
-.DS_Store
-sicurre-*.ipynb
-sicurre-*.md
-
-tasks/
-docs/
-.ruff_cache/
-.pytest_cache/
-.mypy_cache/
 
 .vscode/extensions.json
 .DS_Store
 
 sicurre-*.ipynb
 sicurre-*.md
+
+tasks/
+docs/
+
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
