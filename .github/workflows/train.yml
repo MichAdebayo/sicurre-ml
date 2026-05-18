@@ -42,7 +42,7 @@ jobs:
           mkdir -p ~/.kaggle
           printf '{"username":"%s","key":"%s"}\n' \
             "${{ secrets.KAGGLE_USERNAME }}" \
-            "${{ secrets.KAGGLE_KEY }}" > ~/.kaggle/kaggle.json
+            "${{ secrets.KAGGLE_API_KEY }}" > ~/.kaggle/kaggle.json
           chmod 600 ~/.kaggle/kaggle.json
 
       # ── 1. Upload src/ as a new Kaggle dataset version ───────────────
@@ -77,7 +77,7 @@ jobs:
             "language": "python",
             "kernel_type": "notebook",
             "is_private": true,
-            "enable_gpu": true,
+            "accelerator": "nvidiagpu_t4x2",
             "enable_internet": true,
             "dataset_sources": [
               "${{ env.SRC_DATASET_SLUG }}",

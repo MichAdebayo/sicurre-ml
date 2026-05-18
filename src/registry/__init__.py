@@ -41,12 +41,20 @@ def register_model(
     import mlflow
     import mlflow.transformers
     import transformers
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+    # Load objects explicitly so MLflow receives the model/tokenizer instances
+    # rather than a local path string.  When a path string is passed, MLflow
+    # tries to resolve it as a HuggingFace repo ID to fetch the model card,
+    # which raises a warning because a filesystem path is not a valid repo ID.
+    model_obj = AutoModelForSequenceClassification.from_pretrained(str(save_path))
+    tokenizer_obj = AutoTokenizer.from_pretrained(str(save_path))
 
     mlflow.set_registry_uri("databricks-uc")
 
     with mlflow.start_run(run_id=run_id):
         model_info = mlflow.transformers.log_model(
-            transformers_model=str(save_path),
+            transformers_model={"model": model_obj, "tokenizer": tokenizer_obj},
             name="model",
             task="text-classification",
             registered_model_name=model_name,
@@ -109,7 +117,7 @@ def push_to_hub(
     model = AutoModelForSequenceClassification.from_pretrained(str(save_path))
     tokenizer = AutoTokenizer.from_pretrained(str(save_path))
     model.push_to_hub(hf_repo_id, token=hf_token, commit_message=commit_msg)
-    tokenizer.push_to_hub(hf_repo_id, token=hf_token)
+    tokenizer.push_to_hub(hf_repo_id, token=hf_token, commit_message=commit_msg)
 
     if artifact_dir is not None:
         api = HfApi()
