@@ -38,7 +38,16 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install Kaggle CLI
-        run: pip install kaggle==1.7.*
+        run: pip install kaggle
+
+      - name: Configure Kaggle credentials
+        run: |
+          # New Kaggle CLI config dir is ~/.config/kaggle/ (not ~/.kaggle/)
+          mkdir -p ~/.config/kaggle
+          printf '{"username":"%s","key":"%s"}\n' \
+            "${{ secrets.KAGGLE_USERNAME }}" \
+            "${{ secrets.KAGGLE_API_TOKEN }}" > ~/.config/kaggle/kaggle.json
+          chmod 600 ~/.config/kaggle/kaggle.json
 
       # ── 1. Upload src/ as a new Kaggle dataset version ───────────────
       - name: Upload src/ to Kaggle dataset
