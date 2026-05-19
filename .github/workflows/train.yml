@@ -84,7 +84,7 @@ jobs:
             "language": "python",
             "kernel_type": "notebook",
             "is_private": true,
-            "accelerator": "nvidiagpu_t4x2",
+            "accelerator": "gpu",
             "enable_internet": true,
             "dataset_sources": [
               "${{ env.SRC_DATASET_SLUG }}",
