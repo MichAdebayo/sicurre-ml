@@ -11,6 +11,7 @@ dependencies = [
   "datasets>=3.0",
   "evaluate>=0.4",
   "huggingface-hub>=0.32",
+  "kaggle>=2.1.2",
   "matplotlib>=3.9",
   "mlflow-skinny>=3.0",
   "numpy>=1.24",
