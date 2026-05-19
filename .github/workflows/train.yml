@@ -100,7 +100,10 @@ jobs:
           for i in $(seq 1 $MAX_ATTEMPTS); do
             RAW=$(kaggle kernels status "${{ env.KERNEL_SLUG }}" 2>&1)
             echo "raw: $RAW"
-            STATUS=$(echo "$RAW" | sed -n 's/.*has status "\([^"]*\)".*/\1/p')
+            STATUS=$(echo "$RAW" \
+                     | sed -n 's/.*has status "KernelWorkerStatus\.\([^"]*\)".*/\1/p' \
+                     | tr '[:upper:]' '[:lower:]' \
+                     | tr '_' ' ' | sed 's/ //g')
             echo "[$i/$MAX_ATTEMPTS] kernel status: ${STATUS:-unknown}"
 
             case "$STATUS" in
@@ -108,8 +111,12 @@ jobs:
                 echo "Training completed successfully."
                 exit 0
                 ;;
-              error|cancelAcknowledged|cancel)
+              error)
                 echo "Training failed with status: $STATUS"
+                exit 1
+                ;;
+              cancelacknowledged|cancel)
+                echo "Training cancelled with status: $STATUS"
                 exit 1
                 ;;
             esac
