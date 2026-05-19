@@ -53,7 +53,9 @@ jobs:
       - name: Upload src/ to Kaggle dataset
         run: |
           STAGING=$(mktemp -d)
-          cp -r src "$STAGING/src"
+          # Zip src/ preserving the src/ prefix so the notebook can extract
+          # directly and find src/config/training_config.py at the expected path.
+          zip -r "$STAGING/src.zip" src/
           cat > "$STAGING/dataset-metadata.json" <<EOF
           {
             "title": "sicurre-ml-src",
@@ -61,10 +63,11 @@ jobs:
             "licenses": [{"name": "CC0-1.0"}]
           }
           EOF
+          # No --dir-mode flag: STAGING contains only files (src.zip + metadata),
+          # no subdirectories to zip.
           kaggle datasets version \
             -p "$STAGING" \
-            -m "src update — ${{ github.sha }}" \
-            --dir-mode zip
+            -m "src update — ${{ github.sha }}"
 
       # ── 2. Push notebook to Kaggle and trigger a new run ─────────────
       - name: Push notebook and trigger training run
