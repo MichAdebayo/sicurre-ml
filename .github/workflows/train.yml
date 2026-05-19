@@ -98,9 +98,9 @@ jobs:
           SLEEP_SECS=60
 
           for i in $(seq 1 $MAX_ATTEMPTS); do
-            STATUS=$(kaggle kernels status "${{ env.KERNEL_SLUG }}" 2>/dev/null \
-                     | grep -oE '\b(running|complete|error|queued|cancelAcknowledged|cancel)\b' \
-                     | head -1)
+            RAW=$(kaggle kernels status "${{ env.KERNEL_SLUG }}" 2>&1)
+            echo "raw: $RAW"
+            STATUS=$(echo "$RAW" | sed -n 's/.*has status "\([^"]*\)".*/\1/p')
             echo "[$i/$MAX_ATTEMPTS] kernel status: ${STATUS:-unknown}"
 
             case "$STATUS" in
