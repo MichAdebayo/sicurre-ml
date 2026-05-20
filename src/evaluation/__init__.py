@@ -2,57 +2,73 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import classification_report, confusion_matrix
 
-from src.config.training_config import LABEL_NAMES
-from src.model.metrics import compute_metrics
+from src.config.training_config import ID2LABEL
+
+if TYPE_CHECKING:
+    from transformers import Trainer
 
 
-def evaluate_on_test(trainer, test_dataset) -> dict[str, float]:
-    """Run prediction on test_dataset and return test_-prefixed metrics.
+def evaluate_on_test(
+    trainer: "Trainer",
+    test_dataset: Any,
+    metric_key_prefix: str = "test",
+) -> dict[str, float]:
+    """Evaluate on test_dataset using trainer.evaluate() and return prefixed metrics.
 
-    Ends any active MLflow run before prediction — the HuggingFace MLflow
-    callback may leave the training run open, which prevents clean logging
-    of evaluation results into a separate run context.
+    Removes EarlyStoppingCallback before evaluation to prevent it from
+    interfering with the evaluation loop.
     """
-    import mlflow
+    from transformers import EarlyStoppingCallback
 
-    if mlflow.active_run():
-        mlflow.end_run()
-
-    predictions = trainer.predict(test_dataset)
-    metrics = compute_metrics(
-        (predictions.predictions, predictions.label_ids),
-        id2label={0: "phishing", 1: "spam", 2: "legitimate"},
+    trainer.callback_handler.callbacks = [
+        cb
+        for cb in trainer.callback_handler.callbacks
+        if not isinstance(cb, EarlyStoppingCallback)
+    ]
+    metrics: dict[str, float] = trainer.evaluate(
+        eval_dataset=test_dataset, metric_key_prefix=metric_key_prefix
     )
-    return {f"test_{k}": v for k, v in metrics.items()}
+    return metrics
 
 
 def build_error_dataframe(
     test_df: pd.DataFrame,
-    predictions: np.ndarray,
+    raw_predictions: np.ndarray,
+    id2label: dict[int, str] | None = None,
 ) -> pd.DataFrame:
-    """Return test_df extended with pred_label, confidence, and correct columns."""
-    pred_labels = np.argmax(predictions, axis=-1)
-    confidence = predictions[np.arange(len(pred_labels)), pred_labels]
-    result = test_df.copy().reset_index(drop=True)
-    result["pred_label"] = pred_labels
-    result["confidence"] = confidence
-    result["correct"] = result["label"] == result["pred_label"]
+    """Return test_df extended with prediction columns and per-class probabilities."""
+    from scipy.special import softmax as sp_softmax
+
+    label_map = id2label or ID2LABEL
+    probs = sp_softmax(raw_predictions, axis=-1)
+    pred_labels = np.argmax(raw_predictions, axis=-1)
+    result = test_df.copy()
+    result["predicted"] = pred_labels
+    result["pred_label_name"] = result["predicted"].map(label_map)
+    result["true_label_name"] = result["label"].map(label_map)
+    result["correct"] = result["label"] == result["predicted"]
+    result["confidence"] = probs.max(axis=1)
+    result["pred_phishing_prob"] = probs[:, 0]
+    result["pred_spam_prob"] = probs[:, 1]
+    result["pred_legit_prob"] = probs[:, 2]
     return result
 
 
 def confusion_matrix_arrays(
     true_labels: np.ndarray,
     pred_labels: np.ndarray,
+    num_labels: int = 3,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (counts_cm, row-normalised_cm) for the 3-class classifier."""
-    cm = confusion_matrix(true_labels, pred_labels, labels=[0, 1, 2])
-    row_sums = cm.sum(axis=1, keepdims=True)
-    cm_norm = np.where(row_sums > 0, cm.astype(float) / row_sums, 0.0)
+    """Return (counts_cm, row-normalised_cm) for the num_labels-class classifier."""
+    from sklearn.metrics import confusion_matrix
+
+    cm = confusion_matrix(true_labels, pred_labels, labels=list(range(num_labels)))
+    cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
     return cm, cm_norm
 
 
@@ -60,14 +76,15 @@ def save_classification_report(
     true_labels: np.ndarray,
     pred_labels: np.ndarray,
     output_dir: Path,
+    id2label: dict[int, str] | None = None,
 ) -> Path:
     """Write sklearn classification_report to output_dir/classification_report.txt."""
-    report = classification_report(
-        true_labels,
-        pred_labels,
-        target_names=LABEL_NAMES,
-        zero_division=0,
-    )
-    report_path = Path(output_dir) / "classification_report.txt"
-    report_path.write_text(report)
+    from sklearn.metrics import classification_report
+
+    label_map = id2label or ID2LABEL
+    target_names = [label_map[i] for i in sorted(label_map)]
+    report = classification_report(true_labels, pred_labels, target_names=target_names)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = output_dir / "classification_report.txt"
+    report_path.write_text(report, encoding="utf-8")
     return report_path

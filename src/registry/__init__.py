@@ -2,43 +2,37 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
-
-import mlflow
-import mlflow.tracking
+from typing import Any
 
 from src.config.training_config import RuntimeState, TrainingConfig
 
 
-@dataclass(slots=True)
-class ModelInfo:
-    registered_model_version: str | int
-
-
-def setup_mlflow(state: RuntimeState) -> str:
+def setup_mlflow(runtime_state: RuntimeState) -> str:
     """Configure MLflow tracking URI and create/set experiment.
 
     Uses Databricks Unity Catalog when credentials are present; falls back
-    to a local file-based tracking store under output_dir/mlruns.
+    to a local file-based tracking store.
 
     Returns the experiment path string.
     """
-    if state.databricks_host and state.databricks_token:
-        os.environ.setdefault("DATABRICKS_HOST", state.databricks_host)
-        os.environ.setdefault("DATABRICKS_TOKEN", state.databricks_token)
-        mlflow.set_tracking_uri("databricks")
-        experiment_path = (
-            f"/Users/{state.databricks_email}/{state.mlflow_experiment_name}"
-        )
-        mlflow.set_experiment(experiment_path)
-    else:
-        tracking_dir = state.output_dir / "mlruns"
-        tracking_dir.mkdir(parents=True, exist_ok=True)
-        mlflow.set_tracking_uri(f"file://{tracking_dir.resolve()}")
-        experiment_path = state.mlflow_experiment_name
-        mlflow.set_experiment(experiment_path)
+    import mlflow
 
+    host = runtime_state.databricks_host
+    token = runtime_state.databricks_token
+    if host and token:
+        os.environ["DATABRICKS_HOST"] = host
+        os.environ["DATABRICKS_TOKEN"] = token
+        experiment_path = (
+            f"/Users/{runtime_state.databricks_email}/{runtime_state.mlflow_experiment_name}"
+            if runtime_state.databricks_email
+            else runtime_state.mlflow_experiment_name
+        )
+        mlflow.set_tracking_uri("databricks")
+    else:
+        experiment_path = runtime_state.mlflow_experiment_name
+        mlflow.set_tracking_uri("file:./mlruns")
+    mlflow.set_experiment(experiment_path)
     return experiment_path
 
 
@@ -47,29 +41,33 @@ def register_model(
     save_path: Path,
     model_name: str,
     config: TrainingConfig,
-) -> ModelInfo:
-    """Log saved model artifacts into the MLflow run and register in the registry.
+) -> Any:
+    """Log model to MLflow using the transformers flavour and register it.
 
-    Logs the contents of save_path as a 'model' artifact on the completed run,
-    then creates a registered model version pointing to it.
+    Loads model and tokenizer from save_path, logs via mlflow.transformers,
+    and registers under model_name in the Unity Catalog registry.
     """
-    client = mlflow.tracking.MlflowClient()
+    import mlflow
+    import mlflow.transformers
+    import transformers
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-    # Attach the saved model directory to the completed run as an artifact.
-    client.log_artifacts(run_id, str(save_path), artifact_path="model")
-
-    # Ensure the registered model exists (idempotent).
-    try:
-        client.create_registered_model(model_name)
-    except mlflow.exceptions.MlflowException:
-        pass  # already exists
-
-    mv = client.create_model_version(
-        name=model_name,
-        source=f"runs:/{run_id}/model",
-        run_id=run_id,
-    )
-    return ModelInfo(registered_model_version=mv.version)
+    model_obj = AutoModelForSequenceClassification.from_pretrained(str(save_path))
+    tokenizer_obj = AutoTokenizer.from_pretrained(str(save_path))
+    mlflow.set_registry_uri("databricks-uc")
+    with mlflow.start_run(run_id=run_id):
+        model_info = mlflow.transformers.log_model(
+            transformers_model={"model": model_obj, "tokenizer": tokenizer_obj},
+            name="model",
+            task="text-classification",
+            registered_model_name=model_name,
+            pip_requirements=[
+                f"transformers=={transformers.__version__}",
+                "torch>=2.2",
+                "sentencepiece",
+            ],
+        )
+    return model_info
 
 
 def promote_if_threshold(
@@ -82,21 +80,26 @@ def promote_if_threshold(
 
     Returns True if the model was promoted to @production.
     """
-    f1 = test_metrics.get("test_f1_weighted", 0.0)
-    recall = test_metrics.get("test_phishing_recall", 0.0)
-    promoted = f1 >= f1_threshold and recall >= recall_threshold
+    from mlflow import MlflowClient
 
-    client = mlflow.tracking.MlflowClient()
-    try:
-        versions = client.get_registered_model(model_name).latest_versions
-        if not versions:
-            return False
-        version = versions[-1].version
-        alias = "production" if promoted else "staging"
-        client.set_registered_model_alias(model_name, alias, version)
-    except mlflow.exceptions.MlflowException:
-        pass
-
+    client = MlflowClient()
+    versions = client.search_model_versions(f"name='{model_name}'")
+    latest_version = max(int(v.version) for v in versions)
+    phishing_recall = test_metrics.get("test_phishing_recall", 0.0)
+    f1_weighted = test_metrics.get("test_f1_weighted", 0.0)
+    promoted = phishing_recall >= recall_threshold and f1_weighted >= f1_threshold
+    if promoted:
+        try:
+            client.delete_registered_model_alias(model_name, "production")
+        except Exception:
+            pass
+        client.set_registered_model_alias(
+            model_name, "production", str(latest_version)
+        )
+    else:
+        client.set_registered_model_alias(
+            model_name, "staging", str(latest_version)
+        )
     return promoted
 
 
@@ -105,41 +108,35 @@ def push_to_hub(
     hf_repo_id: str,
     hf_token: str,
     test_metrics: dict[str, float],
-    mlflow_version: str,
-    artifact_dir: Path,
+    mlflow_version: str | None = None,
+    artifact_dir: Path | None = None,
 ) -> str:
     """Push model, tokenizer, and evaluation artifacts to HuggingFace Hub.
 
-    Uploads the full save_path directory plus any evaluation artefacts
-    (confusion matrix image, classification report) from artifact_dir.
     Returns the repo URL.
     """
     from huggingface_hub import HfApi
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-    api = HfApi(token=hf_token)
-    api.create_repo(repo_id=hf_repo_id, exist_ok=True, private=False)
-
-    commit_message = (
-        f"MLflow v{mlflow_version} — "
-        f"F1={test_metrics.get('test_f1_weighted', 0):.4f} "
-        f"phishing_recall={test_metrics.get('test_phishing_recall', 0):.4f}"
+    commit_msg = (
+        f"MLflow v{mlflow_version or '?'} | "
+        f"F1={test_metrics.get('test_f1_weighted', 0.0):.4f} | "
+        f"PhishingRecall={test_metrics.get('test_phishing_recall', 0.0):.4f}"
     )
-
-    # Push model + tokenizer files.
-    api.upload_folder(
-        repo_id=hf_repo_id,
-        folder_path=str(save_path),
-        commit_message=commit_message,
-    )
-
-    # Push evaluation artefacts if they exist.
-    for filename in ("confusion_matrix.png", "classification_report.txt"):
-        artefact = Path(artifact_dir) / filename
-        if artefact.exists():
-            api.upload_file(
-                repo_id=hf_repo_id,
-                path_or_fileobj=str(artefact),
-                path_in_repo=f"eval/{filename}",
-            )
-
+    model = AutoModelForSequenceClassification.from_pretrained(str(save_path))
+    tokenizer = AutoTokenizer.from_pretrained(str(save_path))
+    model.push_to_hub(hf_repo_id, token=hf_token, commit_message=commit_msg)
+    tokenizer.push_to_hub(hf_repo_id, token=hf_token, commit_message=commit_msg)
+    if artifact_dir is not None:
+        api = HfApi()
+        for artifact_name in ("confusion_matrix.png", "classification_report.txt"):
+            artifact_path = Path(artifact_dir) / artifact_name
+            if artifact_path.exists():
+                api.upload_file(
+                    path_or_fileobj=str(artifact_path),
+                    path_in_repo=artifact_name,
+                    repo_id=hf_repo_id,
+                    token=hf_token,
+                    commit_message=f"Upload eval artifact: {artifact_name}",
+                )
     return f"https://huggingface.co/{hf_repo_id}"
