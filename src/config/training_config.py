@@ -46,6 +46,7 @@ class TrainingConfig:
     class_weight_strategy: str = "inverse_freq"
     phishing_boost: float = 2.0
     gamma: float = 1.5
+    mlflow_model_name: str = "main.sicurre.phishing-detector"
 
 
 @dataclass(slots=True)
@@ -148,20 +149,25 @@ def _resolve_output_dir(runtime_env: RuntimeEnv, run_date: str) -> Path:
     return Path("models/camembertav2-phishing-fr") / f"v{run_date}"
 
 
-def build_runtime_state(runtime_env: RuntimeEnv | None = None) -> RuntimeState:
+def build_runtime_state(
+    runtime_env: RuntimeEnv | None = None,
+    data_dir: Path | None = None,
+    output_dir: Path | None = None,
+) -> RuntimeState:
     resolved_runtime = runtime_env or detect_runtime()
     device, use_tpu = detect_device()
     secrets = load_secrets(resolved_runtime)
     run_date = datetime.now().strftime("%Y%m%d")
-    output_dir = _resolve_output_dir(resolved_runtime, run_date)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    resolved_data_dir = data_dir or _resolve_data_dir(resolved_runtime)
+    resolved_output_dir = output_dir or _resolve_output_dir(resolved_runtime, run_date)
+    resolved_output_dir.mkdir(parents=True, exist_ok=True)
     return RuntimeState(
         runtime_env=resolved_runtime,
         device=device,
         use_tpu=use_tpu,
         run_date=run_date,
-        data_dir=_resolve_data_dir(resolved_runtime),
-        output_dir=output_dir,
+        data_dir=resolved_data_dir,
+        output_dir=resolved_output_dir,
         secrets=secrets,
         hf_token=secrets["HF_TOKEN"],
         databricks_host=secrets["DATABRICKS_HOST"],
