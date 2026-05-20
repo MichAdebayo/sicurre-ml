@@ -1,4 +1,3 @@
-"""MLflow experiment tracking, model registry, and HuggingFace Hub publication."""
 from __future__ import annotations
 
 import os
@@ -9,17 +8,12 @@ from src.config.training_config import RuntimeState, TrainingConfig
 
 
 def setup_mlflow(runtime_state: RuntimeState) -> str:
-    """Configure MLflow tracking URI and create/set experiment.
-
-    Uses Databricks Unity Catalog when credentials are present; falls back
-    to a local file-based tracking store.
-
-    Returns the experiment path string.
-    """
+    """Configure MLflow tracking URI and experiment. Returns the experiment path."""
     import mlflow
 
     host = runtime_state.databricks_host
     token = runtime_state.databricks_token
+
     if host and token:
         os.environ["DATABRICKS_HOST"] = host
         os.environ["DATABRICKS_TOKEN"] = token
@@ -32,6 +26,7 @@ def setup_mlflow(runtime_state: RuntimeState) -> str:
     else:
         experiment_path = runtime_state.mlflow_experiment_name
         mlflow.set_tracking_uri("file:./mlruns")
+
     mlflow.set_experiment(experiment_path)
     return experiment_path
 
@@ -42,25 +37,42 @@ def register_model(
     model_name: str,
     config: TrainingConfig,
 ) -> Any:
-    """Log model to MLflow using the transformers flavour and register it.
-
-    Loads model and tokenizer from save_path, logs via mlflow.transformers,
-    and registers under model_name in the Unity Catalog registry.
-    """
+    """Log and register a saved transformers model in the MLflow Unity Catalog registry."""
     import mlflow
     import mlflow.transformers
     import transformers
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+    # Load objects explicitly so MLflow receives the model/tokenizer instances
+    # rather than a local path string.  When a path string is passed, MLflow
+    # tries to resolve it as a HuggingFace repo ID to fetch the model card,
+    # which raises a warning because a filesystem path is not a valid repo ID.
     model_obj = AutoModelForSequenceClassification.from_pretrained(str(save_path))
     tokenizer_obj = AutoTokenizer.from_pretrained(str(save_path))
-    mlflow.set_registry_uri("databricks-uc")
+
+    # setup_mlflow() sets DATABRICKS_HOST/TOKEN when credentials are available.
+    # Only point at Unity Catalog when those env vars are actually present;
+    # otherwise log the model locally without registering (no hard crash on
+    # runs where Databricks secrets have not been configured in Kaggle).
+    has_databricks = bool(
+        os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
+    )
+    if has_databricks:
+        mlflow.set_registry_uri("databricks-uc")
+        registered_name: str | None = model_name
+    else:
+        print(
+            "[registry] Databricks credentials not found — "
+            "logging model artifact without Unity Catalog registration."
+        )
+        registered_name = None
+
     with mlflow.start_run(run_id=run_id):
         model_info = mlflow.transformers.log_model(
             transformers_model={"model": model_obj, "tokenizer": tokenizer_obj},
             name="model",
             task="text-classification",
-            registered_model_name=model_name,
+            registered_model_name=registered_name,
             pip_requirements=[
                 f"transformers=={transformers.__version__}",
                 "torch>=2.2",
@@ -76,30 +88,35 @@ def promote_if_threshold(
     recall_threshold: float = 0.97,
     f1_threshold: float = 0.90,
 ) -> bool:
-    """Assign @production alias if metrics meet both thresholds, else @staging.
+    """Assign @production or @staging alias in MLflow registry. Returns True if promoted."""
+    has_databricks = bool(
+        os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
+    )
+    if not has_databricks:
+        print(
+            "[promote] Databricks credentials not found — skipping alias promotion."
+        )
+        return False
 
-    Returns True if the model was promoted to @production.
-    """
     from mlflow import MlflowClient
 
     client = MlflowClient()
     versions = client.search_model_versions(f"name='{model_name}'")
     latest_version = max(int(v.version) for v in versions)
+
     phishing_recall = test_metrics.get("test_phishing_recall", 0.0)
     f1_weighted = test_metrics.get("test_f1_weighted", 0.0)
     promoted = phishing_recall >= recall_threshold and f1_weighted >= f1_threshold
+
     if promoted:
         try:
             client.delete_registered_model_alias(model_name, "production")
         except Exception:
             pass
-        client.set_registered_model_alias(
-            model_name, "production", str(latest_version)
-        )
+        client.set_registered_model_alias(model_name, "production", str(latest_version))
     else:
-        client.set_registered_model_alias(
-            model_name, "staging", str(latest_version)
-        )
+        client.set_registered_model_alias(model_name, "staging", str(latest_version))
+
     return promoted
 
 
@@ -111,10 +128,7 @@ def push_to_hub(
     mlflow_version: str | None = None,
     artifact_dir: Path | None = None,
 ) -> str:
-    """Push model, tokenizer, and evaluation artifacts to HuggingFace Hub.
-
-    Returns the repo URL.
-    """
+    """Push model + tokenizer to HuggingFace Hub. Returns the HF repo URL."""
     from huggingface_hub import HfApi
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -123,14 +137,16 @@ def push_to_hub(
         f"F1={test_metrics.get('test_f1_weighted', 0.0):.4f} | "
         f"PhishingRecall={test_metrics.get('test_phishing_recall', 0.0):.4f}"
     )
+
     model = AutoModelForSequenceClassification.from_pretrained(str(save_path))
     tokenizer = AutoTokenizer.from_pretrained(str(save_path))
     model.push_to_hub(hf_repo_id, token=hf_token, commit_message=commit_msg)
     tokenizer.push_to_hub(hf_repo_id, token=hf_token, commit_message=commit_msg)
+
     if artifact_dir is not None:
         api = HfApi()
         for artifact_name in ("confusion_matrix.png", "classification_report.txt"):
-            artifact_path = Path(artifact_dir) / artifact_name
+            artifact_path = artifact_dir / artifact_name
             if artifact_path.exists():
                 api.upload_file(
                     path_or_fileobj=str(artifact_path),
@@ -139,4 +155,5 @@ def push_to_hub(
                     token=hf_token,
                     commit_message=f"Upload eval artifact: {artifact_name}",
                 )
+
     return f"https://huggingface.co/{hf_repo_id}"
