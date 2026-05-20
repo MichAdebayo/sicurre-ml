@@ -23,9 +23,14 @@ def setup_mlflow(runtime_state: RuntimeState) -> str:
             else runtime_state.mlflow_experiment_name
         )
         mlflow.set_tracking_uri("databricks")
+        print(f"[mlflow] Tracking → Databricks  experiment: {experiment_path}")
     else:
         experiment_path = runtime_state.mlflow_experiment_name
         mlflow.set_tracking_uri("file:./mlruns")
+        print(
+            "[mlflow] Tracking → local file:./mlruns  "
+            "(DATABRICKS_HOST/TOKEN not found in secrets — check Kaggle secret names)"
+        )
 
     mlflow.set_experiment(experiment_path)
     return experiment_path

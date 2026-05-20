@@ -27,6 +27,7 @@ ml = [
 ]
 # MLOps tooling — experiment tracking, model registry, dataset sync, visualisation
 mlops = [
+  "databricks-sdk>=0.20",
   "huggingface-hub>=0.32",
   "kaggle>=2.1.2",
   "matplotlib>=3.9",
