@@ -2281,6 +2281,7 @@ ml = [
     { name = "transformers" },
 ]
 mlops = [
+    { name = "databricks-sdk" },
     { name = "huggingface-hub" },
     { name = "kaggle" },
     { name = "matplotlib" },
@@ -2312,6 +2313,7 @@ ml = [
     { name = "transformers", specifier = ">=4.50" },
 ]
 mlops = [
+    { name = "databricks-sdk", specifier = ">=0.20" },
     { name = "huggingface-hub", specifier = ">=0.32" },
     { name = "kaggle", specifier = ">=2.1.2" },
     { name = "matplotlib", specifier = ">=3.9" },
