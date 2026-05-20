@@ -50,14 +50,29 @@ def register_model(
     model_obj = AutoModelForSequenceClassification.from_pretrained(str(save_path))
     tokenizer_obj = AutoTokenizer.from_pretrained(str(save_path))
 
-    mlflow.set_registry_uri("databricks-uc")
+    # setup_mlflow() sets DATABRICKS_HOST/TOKEN when credentials are available.
+    # Only point at Unity Catalog when those env vars are actually present;
+    # otherwise log the model locally without registering (no hard crash on
+    # runs where Databricks secrets have not been configured in Kaggle).
+    has_databricks = bool(
+        os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
+    )
+    if has_databricks:
+        mlflow.set_registry_uri("databricks-uc")
+        registered_name: str | None = model_name
+    else:
+        print(
+            "[registry] Databricks credentials not found — "
+            "logging model artifact without Unity Catalog registration."
+        )
+        registered_name = None
 
     with mlflow.start_run(run_id=run_id):
         model_info = mlflow.transformers.log_model(
             transformers_model={"model": model_obj, "tokenizer": tokenizer_obj},
             name="model",
             task="text-classification",
-            registered_model_name=model_name,
+            registered_model_name=registered_name,
             pip_requirements=[
                 f"transformers=={transformers.__version__}",
                 "torch>=2.2",
@@ -74,6 +89,15 @@ def promote_if_threshold(
     f1_threshold: float = 0.90,
 ) -> bool:
     """Assign @production or @staging alias in MLflow registry. Returns True if promoted."""
+    has_databricks = bool(
+        os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
+    )
+    if not has_databricks:
+        print(
+            "[promote] Databricks credentials not found — skipping alias promotion."
+        )
+        return False
+
     from mlflow import MlflowClient
 
     client = MlflowClient()
