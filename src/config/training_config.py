@@ -99,21 +99,37 @@ def load_secrets(runtime_env: RuntimeEnv) -> dict[str, str | None]:
         from kaggle_secrets import UserSecretsClient
 
         client = UserSecretsClient()
+        missing: list[str] = []
         for key in _SECRET_KEYS:
             try:
                 secrets[key] = client.get_secret(key)
             except Exception:
                 secrets[key] = None
+                missing.append(key)
+        if missing:
+            print(
+                f"[secrets] WARNING: {len(missing)} secret(s) not attached to this "
+                f"notebook: {missing}\n"
+                "         → In the Kaggle notebook UI go to Environment → Secrets "
+                "and toggle each one on."
+            )
         return secrets
 
     if runtime_env == "colab":
         from google.colab import userdata
 
+        missing = []
         for key in _SECRET_KEYS:
             try:
                 secrets[key] = userdata.get(key)
             except Exception:
                 secrets[key] = None
+                missing.append(key)
+        if missing:
+            print(
+                f"[secrets] WARNING: {len(missing)} secret(s) not found "
+                f"in Colab userdata: {missing}"
+            )
         return secrets
 
     load_dotenv()
