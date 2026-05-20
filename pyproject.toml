@@ -6,27 +6,35 @@ authors = [{ name = "Michael Adebayo" }]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11,<3.13"
+# Base: only what every concern shares (secret loading used by training_config.py)
 dependencies = [
+  "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+# Core training stack — needed on Kaggle and for local training runs
+ml = [
   "accelerate>=1.1",
   "datasets>=3.0",
   "evaluate>=0.4",
-  "huggingface-hub>=0.32",
-  "kaggle>=2.1.2",
-  "matplotlib>=3.9",
-  "mlflow-skinny>=3.0",
   "numpy>=1.24",
-  "optuna>=4.0",
   "pandas>=2.0",
-  "python-dotenv>=1.0",
   "scikit-learn>=1.2",
   "scipy>=1.10",
-  "seaborn>=0.13",
   "sentencepiece>=0.2",
   "torch>=2.2",
   "transformers>=4.50",
 ]
-
-[dependency-groups]
+# MLOps tooling — experiment tracking, model registry, dataset sync, visualisation
+mlops = [
+  "huggingface-hub>=0.32",
+  "kaggle>=2.1.2",
+  "matplotlib>=3.9",
+  "mlflow-skinny>=3.0",
+  "optuna>=4.0",
+  "seaborn>=0.13",
+]
+# Local development and CI quality gates
 dev = [
   "pytest>=8.3",
   "pytest-asyncio>=0.23",
