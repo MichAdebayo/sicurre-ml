@@ -96,22 +96,37 @@ def load_secrets(runtime_env: RuntimeEnv) -> dict[str, str | None]:
     secrets = _empty_secrets()
 
     if runtime_env == "kaggle":
-        from kaggle_secrets import UserSecretsClient
-
-        client = UserSecretsClient()
+        # CI push: GitHub secrets are injected as os.environ in a prepended cell
+        # before this code runs.  Interactive run: fall back to UserSecretsClient.
+        _usk: object = None
+        _usk_init = False
         missing: list[str] = []
         for key in _SECRET_KEYS:
-            try:
-                secrets[key] = client.get_secret(key)
-            except Exception:
+            if os.environ.get(key):
+                secrets[key] = os.environ[key]
+                continue
+            if not _usk_init:
+                try:
+                    from kaggle_secrets import UserSecretsClient
+
+                    _usk = UserSecretsClient()
+                except Exception:
+                    pass
+                _usk_init = True
+            if _usk is not None:
+                try:
+                    secrets[key] = _usk.get_secret(key)  # type: ignore[attr-defined]
+                except Exception:
+                    secrets[key] = None
+                    missing.append(key)
+            else:
                 secrets[key] = None
                 missing.append(key)
         if missing:
             print(
-                f"[secrets] WARNING: {len(missing)} secret(s) not attached to this "
-                f"notebook: {missing}\n"
-                "         → In the Kaggle notebook UI go to Environment → Secrets "
-                "and toggle each one on."
+                f"[secrets] WARNING: {len(missing)} secret(s) not available: {missing}\n"
+                "         → CI push: verify all 7 secrets are set in GitHub repo secrets.\n"
+                "         → Interactive: attach in Kaggle UI → Environment → Secrets."
             )
         return secrets
 

@@ -73,9 +73,53 @@ jobs:
       - name: Push notebook and trigger training run
         env:
           KAGGLE_TRAINING_DATASET: ${{ inputs.training_dataset || secrets.KAGGLE_TRAINING_DATASET }}
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_EMAIL: ${{ secrets.DATABRICKS_EMAIL }}
+          MLFLOW_EXPERIMENT_NAME: ${{ secrets.MLFLOW_EXPERIMENT_NAME }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          REPO_NAME: ${{ secrets.REPO_NAME }}
         run: |
           STAGING=$(mktemp -d)
           cp ml/kaggle_training.ipynb "$STAGING/notebook.ipynb"
+
+          # Inject GitHub secrets as os.environ in a prepended notebook cell.
+          # UserSecretsClient only works in interactive (Kaggle UI) runs;
+          # API-triggered (kaggle kernels push) runs cannot access it.
+          cat > /tmp/inject_secrets.py << 'PYEOF'
+          import json, os, sys
+
+          KEYS = (
+              "DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_EMAIL",
+              "MLFLOW_EXPERIMENT_NAME", "HF_TOKEN", "HF_USERNAME", "REPO_NAME",
+          )
+
+          path = sys.argv[1]
+          nb = json.load(open(path))
+
+          lines = ["import os\n"]
+          injected = 0
+          for k in KEYS:
+              v = os.environ.get(k, "")
+              if v:
+                  lines.append(f"os.environ[{json.dumps(k)}] = {json.dumps(v)}\n")
+                  injected += 1
+          lines.append('print("[ci-secrets] CI-injected environment secrets loaded.")\n')
+
+          nb["cells"].insert(0, {
+              "cell_type": "code",
+              "execution_count": None,
+              "metadata": {},
+              "outputs": [],
+              "source": lines,
+          })
+
+          json.dump(nb, open(path, "w"))
+          print(f"[ci-secrets] Notebook patched: {injected} of {len(KEYS)} secrets injected.")
+          PYEOF
+          python3 /tmp/inject_secrets.py "$STAGING/notebook.ipynb"
+
           cat > "$STAGING/kernel-metadata.json" <<EOF
           {
             "id": "${{ env.KERNEL_SLUG }}",
