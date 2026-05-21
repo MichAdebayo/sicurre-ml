@@ -133,7 +133,14 @@ def push_to_hub(
     mlflow_version: str | None = None,
     artifact_dir: Path | None = None,
 ) -> str:
-    """Push model + tokenizer to HuggingFace Hub. Returns the HF repo URL."""
+    """Push model + tokenizer to HuggingFace Hub.
+
+    After pushing weights and artifacts, moves the ``production`` git tag to
+    the new commit so the app can always load ``revision="production"`` without
+    ever needing to track a commit SHA.
+
+    Returns the HF repo URL (``https://huggingface.co/{hf_repo_id}``).
+    """
     from huggingface_hub import HfApi
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -148,8 +155,9 @@ def push_to_hub(
     model.push_to_hub(hf_repo_id, token=hf_token, commit_message=commit_msg)
     tokenizer.push_to_hub(hf_repo_id, token=hf_token, commit_message=commit_msg)
 
+    api = HfApi()
+
     if artifact_dir is not None:
-        api = HfApi()
         for artifact_name in ("confusion_matrix.png", "classification_report.txt"):
             artifact_path = artifact_dir / artifact_name
             if artifact_path.exists():
@@ -160,5 +168,17 @@ def push_to_hub(
                     token=hf_token,
                     commit_message=f"Upload eval artifact: {artifact_name}",
                 )
+
+    # Move the `production` tag to the current HEAD of main.
+    # The app loads the model with revision="production" and never needs
+    # to track commit SHAs — this tag only advances on an explicit promotion.
+    api.create_tag(
+        repo_id=hf_repo_id,
+        tag="production",
+        revision="main",
+        token=hf_token,
+        exist_ok=True,  # overwrites the tag if it already exists
+    )
+    print(f"[registry] HF tag 'production' → {hf_repo_id}@main")
 
     return f"https://huggingface.co/{hf_repo_id}"
