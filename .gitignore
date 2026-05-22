@@ -21,3 +21,5 @@ docs/
 .vscode/
 docs/
 tasks/
+sample_*.md
+temp/
