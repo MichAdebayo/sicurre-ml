@@ -12,7 +12,11 @@ on:
   push:
     branches: [mlops]
     paths:
-      - "src/**"
+      - "src/config/**"
+      - "src/data/**"
+      - "src/model/**"
+      - "src/training/**"
+      - "src/registry/**"
       - "ml/kaggle_training.ipynb"
       - ".github/workflows/train.yml"
 
