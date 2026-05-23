@@ -2355,6 +2355,7 @@ inference = [
     { name = "httpx" },
     { name = "onnxruntime" },
     { name = "pydantic" },
+    { name = "transformers" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 ml = [
@@ -2398,6 +2399,7 @@ inference = [
     { name = "httpx", specifier = ">=0.27" },
     { name = "onnxruntime", specifier = ">=1.18" },
     { name = "pydantic", specifier = ">=2.0" },
+    { name = "transformers", specifier = ">=4.50" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.29" },
 ]
 ml = [
