@@ -22,4 +22,5 @@ docs/
 docs/
 tasks/
 sample_*.md
-temp/
+*temp/
+*tmp/
