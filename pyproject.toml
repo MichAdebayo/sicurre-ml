@@ -33,7 +33,7 @@ mlops = [
   "kaggle>=2.1.2",
   "matplotlib>=3.9",
   "mlflow-skinny>=3.0",
-  "optimum>=1.21",
+  "optimum>=1.21,<2.0",
   "optuna>=4.0",
   "seaborn>=0.13",
 ]
