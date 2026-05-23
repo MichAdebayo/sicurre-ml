@@ -92,14 +92,17 @@ def promote_if_threshold(
     test_metrics: dict[str, float],
     recall_floor: float = 0.97,
     f1_floor: float = 0.90,
+    tolerance: float = 0.0,
 ) -> bool:
     """Assign @production or @staging alias in MLflow registry. Returns True if promoted.
 
     Promotion logic:
-    - If a @production model already exists, the new model must beat its recall
-      AND F1 (not just match them).  The floor thresholds still act as a minimum
-      safety net — a model that regresses below the floor is never promoted even
-      if the bar was already low.
+    - If a @production model already exists, the new model must match or beat
+      its recall AND F1 minus ``tolerance``.  The floor thresholds still act as
+      a minimum safety net — a model that regresses below the floor is never
+      promoted even if the bar was already low.
+    - ``tolerance`` (default 0.0) allows a small metric drop caused by noise or
+      a larger, more varied dataset.  Set via the PROMOTION_TOLERANCE env var.
     - If no @production model exists yet, the floor thresholds alone decide.
     """
     has_databricks = bool(
@@ -146,15 +149,16 @@ def promote_if_threshold(
             f"(recall≥{recall_floor:.2f} f1≥{f1_floor:.2f})"
         )
 
-    promoted = new_recall >= prod_recall and new_f1 >= prod_f1
+    promoted = new_recall >= prod_recall - tolerance and new_f1 >= prod_f1 - tolerance
     if has_production and promoted:
         beats_by = f"recall+{new_recall - float(prod_recall):.4f}  f1+{new_f1 - float(prod_f1):.4f}"
         print(f"[promote] New model beats production — {beats_by}")
     elif not promoted:
+        tol_note = f" (tolerance={tolerance:.4f})" if tolerance else ""
         print(
-            f"[promote] New model did not beat bar — "
-            f"recall={new_recall:.4f} (need {prod_recall:.4f})  "
-            f"f1={new_f1:.4f} (need {prod_f1:.4f})"
+            f"[promote] New model did not beat bar{tol_note} — "
+            f"recall={new_recall:.4f} (need {prod_recall - tolerance:.4f})  "
+            f"f1={new_f1:.4f} (need {prod_f1 - tolerance:.4f})"
         )
 
     if promoted:
