@@ -103,6 +103,16 @@ def ready() -> dict[str, Any]:
 )
 def classify(request: ClassifyRequest) -> ClassifyResponse:
     """Run the full phishing detection pipeline on the provided text."""
+    from src.inference.onnx_classifier import _load_session_and_tokenizer
+
+    try:
+        _load_session_and_tokenizer()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Model not ready: {exc}",
+        )
+
     result: ClassificationResult = run_pipeline(
         text=request.text,
         use_virustotal=request.use_virustotal,
