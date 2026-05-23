@@ -84,6 +84,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
           REPO_NAME: ${{ secrets.REPO_NAME }}
+          PROMOTION_TOLERANCE: ${{ secrets.PROMOTION_TOLERANCE }}
         run: |
           STAGING=$(mktemp -d)
           cp ml/kaggle_training.ipynb "$STAGING/notebook.ipynb"
@@ -97,6 +98,7 @@ jobs:
           KEYS = (
               "DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_EMAIL",
               "MLFLOW_EXPERIMENT_NAME", "HF_TOKEN", "HF_USERNAME", "REPO_NAME",
+              "PROMOTION_TOLERANCE",
           )
 
           path = sys.argv[1]
