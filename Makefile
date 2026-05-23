@@ -27,11 +27,11 @@ classify-test:
 	  -d '{"text": "Votre compte Ameli a été suspendu. Cliquez ici: http://ameli-remboursement.tk/verify", "use_llm": false}' \
 	  | python3 -m json.tool
 
-## Verify the sicurre app PhishTank endpoint is reachable (requires SICURRE_INTERNAL_API_KEY in env)
+## Verify the sicurre app PhishTank endpoint is reachable (requires INTERNAL_API_KEY in env)
 phishtank-test:
-	@test -n "$$SICURRE_INTERNAL_API_KEY" || (echo "ERROR: SICURRE_INTERNAL_API_KEY not set" && exit 1)
+	@test -n "$$INTERNAL_API_KEY" || (echo "ERROR: INTERNAL_API_KEY not set" && exit 1)
 	curl -s \
-	  -H "Authorization: Bearer $$SICURRE_INTERNAL_API_KEY" \
+	  -H "Authorization: Bearer $$INTERNAL_API_KEY" \
 	  "$$PHISHTANK_ENDPOINT_URL" \
 	  | python3 -c "import json,sys; d=json.load(sys.stdin); print(f'OK — {d[\"count\"]} URLs from {d[\"source\"]} at {d[\"generated_at\"]}')"
 

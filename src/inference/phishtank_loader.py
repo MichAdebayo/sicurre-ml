@@ -16,14 +16,14 @@ def load_phishtank_urls() -> list[str]:
     ---------------------
     PHISHTANK_SOURCE          : "http" or "file" (default: "http")
     PHISHTANK_ENDPOINT_URL    : full URL to the sicurre app snapshot endpoint
-    SICURRE_INTERNAL_API_KEY  : bearer token for the internal endpoint
+    INTERNAL_API_KEY           : bearer token for the internal endpoint
     PHISHTANK_FILE_PATH       : path to a local phishtank_urls.json fallback
     """
     source = os.getenv("PHISHTANK_SOURCE", "http")
 
     if source == "http":
         endpoint = os.environ["PHISHTANK_ENDPOINT_URL"]
-        key = os.environ["SICURRE_INTERNAL_API_KEY"]
+        key = os.environ["INTERNAL_API_KEY"]
         try:
             resp = httpx.get(
                 endpoint,
