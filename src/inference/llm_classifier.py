@@ -1,6 +1,6 @@
 """Stage 4 — LLM-based classification with tiered fallback.
 
-Tier order: Groq → Cerebras → Perplexity → Gemini
+Tier order: Groq → Cerebras → Gemini
 Each tier is tried in order; on failure (rate limit, timeout, error) the next
 tier is attempted. Returns None only if all tiers fail.
 """
@@ -80,21 +80,6 @@ def _call_cerebras(text: str) -> LLMResult | None:
         temperature=temperature,
         text=text,
         provider="cerebras",
-    )
-
-
-def _call_perplexity(text: str) -> LLMResult | None:
-    api_key = os.getenv("PERPLEXITY_API_KEY")
-    model = os.getenv("PERPLEXITY_MODEL", "sonar")
-    if not api_key:
-        return None
-    return _openai_compatible(
-        base_url="https://api.perplexity.ai",
-        api_key=api_key,
-        model=model,
-        temperature=0.3,
-        text=text,
-        provider="perplexity",
     )
 
 
@@ -184,7 +169,7 @@ def _parse_response(raw: str, provider: str) -> LLMResult | None:
 # Public interface
 # ---------------------------------------------------------------------------
 
-_TIERS = [_call_groq, _call_cerebras, _call_perplexity, _call_gemini]
+_TIERS = [_call_groq, _call_cerebras, _call_gemini]
 
 
 def classify_llm(text: str) -> LLMResult | None:
