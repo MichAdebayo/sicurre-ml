@@ -169,6 +169,61 @@ def promote_if_threshold(
     return promoted
 
 
+def export_to_onnx(
+    save_path: Path,
+    hf_repo_id: str,
+    hf_token: str,
+    opset: int = 17,
+) -> Path:
+    """Export the saved PyTorch model to ONNX and push model.onnx to HF Hub.
+
+    Uses ``optimum`` to convert the text-classification model, then uploads
+    ``model.onnx`` to the same HF repo that already holds the weights.
+    The inference API's onnx_classifier.py downloads it on next restart via
+    its SHA-based cache invalidation.
+
+    Returns the local path to the exported model.onnx (stored inside save_path).
+    """
+    import shutil
+    import tempfile
+
+    from huggingface_hub import HfApi
+    from optimum.exporters.onnx import main_export
+
+    stable_path = save_path / "model.onnx"
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        onnx_dir = Path(tmp_dir) / "onnx_export"
+        print(f"[onnx-export] Exporting {save_path.name} → ONNX (opset={opset}) ...")
+        main_export(
+            model_name_or_path=str(save_path),
+            output=onnx_dir,
+            task="text-classification",
+            opset=opset,
+            no_post_process=False,
+        )
+
+        onnx_path = onnx_dir / "model.onnx"
+        if not onnx_path.exists():
+            found = [p.name for p in onnx_dir.iterdir()] if onnx_dir.exists() else []
+            raise FileNotFoundError(
+                f"Expected model.onnx in {onnx_dir}; found: {found}"
+            )
+
+        shutil.copy(onnx_path, stable_path)
+
+    api = HfApi()
+    api.upload_file(
+        path_or_fileobj=str(stable_path),
+        path_in_repo="model.onnx",
+        repo_id=hf_repo_id,
+        token=hf_token,
+        commit_message=f"Add model.onnx — optimum ONNX export (opset {opset})",
+    )
+    print(f"[onnx-export] Pushed model.onnx → {hf_repo_id}")
+    return stable_path
+
+
 def push_to_hub(
     save_path: Path,
     hf_repo_id: str,
