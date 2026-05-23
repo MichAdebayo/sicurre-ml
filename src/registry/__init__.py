@@ -90,10 +90,18 @@ def register_model(
 def promote_if_threshold(
     model_name: str,
     test_metrics: dict[str, float],
-    recall_threshold: float = 0.97,
-    f1_threshold: float = 0.90,
+    recall_floor: float = 0.97,
+    f1_floor: float = 0.90,
 ) -> bool:
-    """Assign @production or @staging alias in MLflow registry. Returns True if promoted."""
+    """Assign @production or @staging alias in MLflow registry. Returns True if promoted.
+
+    Promotion logic:
+    - If a @production model already exists, the new model must beat its recall
+      AND F1 (not just match them).  The floor thresholds still act as a minimum
+      safety net — a model that regresses below the floor is never promoted even
+      if the bar was already low.
+    - If no @production model exists yet, the floor thresholds alone decide.
+    """
     has_databricks = bool(
         os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
     )
@@ -109,9 +117,45 @@ def promote_if_threshold(
     versions = client.search_model_versions(f"name='{model_name}'")
     latest_version = max(int(v.version) for v in versions)
 
-    phishing_recall = test_metrics.get("test_phishing_recall", 0.0)
-    f1_weighted = test_metrics.get("test_f1_weighted", 0.0)
-    promoted = phishing_recall >= recall_threshold and f1_weighted >= f1_threshold
+    new_recall = test_metrics.get("test_phishing_recall", 0.0)
+    new_f1 = test_metrics.get("test_f1_weighted", 0.0)
+
+    # --- Compare against current production model if one exists ----------
+    prod_recall: float = recall_floor
+    prod_f1: float = f1_floor
+    has_production = False
+
+    try:
+        prod_mv = client.get_model_version_by_alias(model_name, "production")
+        prod_run = client.get_run(prod_mv.run_id)
+        prod_metrics = prod_run.data.metrics
+        fetched_recall = prod_metrics.get("test_phishing_recall")
+        fetched_f1 = prod_metrics.get("test_f1_weighted")
+        if fetched_recall is not None and fetched_f1 is not None:
+            # Use production score as the bar, but never drop below the floor
+            prod_recall = max(float(fetched_recall), recall_floor)
+            prod_f1 = max(float(fetched_f1), f1_floor)
+            has_production = True
+            print(
+                f"[promote] Production baseline — recall={fetched_recall:.4f}  "
+                f"f1={fetched_f1:.4f}  (effective bar: recall≥{prod_recall:.4f} f1≥{prod_f1:.4f})"
+            )
+    except Exception:
+        print(
+            f"[promote] No @production model found — using floor thresholds "
+            f"(recall≥{recall_floor:.2f} f1≥{f1_floor:.2f})"
+        )
+
+    promoted = new_recall >= prod_recall and new_f1 >= prod_f1
+    if has_production and promoted:
+        beats_by = f"recall+{new_recall - float(prod_recall):.4f}  f1+{new_f1 - float(prod_f1):.4f}"
+        print(f"[promote] New model beats production — {beats_by}")
+    elif not promoted:
+        print(
+            f"[promote] New model did not beat bar — "
+            f"recall={new_recall:.4f} (need {prod_recall:.4f})  "
+            f"f1={new_f1:.4f} (need {prod_f1:.4f})"
+        )
 
     if promoted:
         try:
