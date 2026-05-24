@@ -1590,22 +1590,6 @@ wheels = [
 ]
 
 [[package]]
-name = "optimum"
-version = "1.27.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "huggingface-hub" },
-    { name = "numpy" },
-    { name = "packaging" },
-    { name = "torch" },
-    { name = "transformers" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f9/58/fd6c82021697ae2f1de710af65fa177ad46a620a10c16974546085d1e7a8/optimum-1.27.0.tar.gz", hash = "sha256:ad80d80de336ca5e1e6b4f5ade824da731a945846208871acd2e2ada91002a7b", size = 344027, upload-time = "2025-07-30T16:40:44.659Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/98/2d/4978f9b0ddb6a6af12ff71831f78f84e9dd488f401367290d11a92870b97/optimum-1.27.0-py3-none-any.whl", hash = "sha256:11efa8934860d7456704456405a4bd2d3007bcce098c4430d95840dfdb80e16d", size = 425787, upload-time = "2025-07-30T16:40:42.776Z" },
-]
-
-[[package]]
 name = "optuna"
 version = "4.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2376,7 +2360,6 @@ mlops = [
     { name = "kaggle" },
     { name = "matplotlib" },
     { name = "mlflow-skinny" },
-    { name = "optimum" },
     { name = "optuna" },
     { name = "seaborn" },
 ]
@@ -2420,7 +2403,6 @@ mlops = [
     { name = "kaggle", specifier = ">=2.1.2" },
     { name = "matplotlib", specifier = ">=3.9" },
     { name = "mlflow-skinny", specifier = ">=3.0" },
-    { name = "optimum", specifier = ">=1.21,<2.0" },
     { name = "optuna", specifier = ">=4.0" },
     { name = "seaborn", specifier = ">=0.13" },
 ]
