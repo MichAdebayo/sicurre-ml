@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# docker-compose.prod.yml — PRODUCTION (Hetzner server)
+#
+# References the pre-built GHCR image (set IMAGE_TAG in .env).
+# App is bound to 127.0.0.1:8001 — nginx proxies public traffic to it.
+# Grafana Alloy ships container logs to Grafana Cloud Loki.
+#
+# Requires on the server:
+#   .env file with all secrets + IMAGE_TAG
+#   deploy/alloy/config.alloy with Grafana Cloud credentials
+#   Docker authenticated to ghcr.io (see deploy/README.md)
+#
+# Usage (run as sicurre-prod):
+#   docker compose -f docker-compose.prod.yml pull app
+#   docker compose -f docker-compose.prod.yml up -d --remove-orphans
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  app:
+    image: ghcr.io/${GHCR_OWNER}/sicurre-ml:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    ports:
+      # Bind only to loopback — nginx fronts this, nothing reaches it directly.
+      - "127.0.0.1:8001:8000"
+    env_file: .env
+    environment:
+      REDIS_URL: "redis://redis:6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - onnx_cache:/tmp/sicurre_onnx
+    logging:
+      # Structured JSON logs are emitted to stdout and captured here.
+      # Alloy tails these logs and ships them to Grafana Cloud Loki.
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    # Redis is internal only — no port exposed to the host.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  alloy:
+    # Grafana Alloy: ships container logs from this compose stack to Loki.
+    # Config file is in deploy/alloy/config.alloy — copy it to the server
+    # before first deploy (see deploy/README.md).
+    image: grafana/alloy:latest
+    restart: unless-stopped
+    volumes:
+      - ./deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Docker socket: needed for Alloy to discover container log paths.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # /var/lib/docker/containers: needed to read container log files.
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: run /etc/alloy/config.alloy
+    depends_on:
+      - app
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  onnx_cache:
+  redis_data:
