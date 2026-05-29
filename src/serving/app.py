@@ -18,10 +18,10 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Security, status
 
 load_dotenv()
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer  # noqa: E402
+from pydantic import BaseModel, Field  # noqa: E402
 
-from src.inference.pipeline import ClassificationResult, run_pipeline
+from src.inference.pipeline import ClassificationResult, run_pipeline  # noqa: E402
 
 app = FastAPI(
     title="Sicurre Inference API",
