@@ -1,0 +1,117 @@
+name: CI
+
+# Runs on every push to every branch and on every pull request.
+# All jobs must pass before the docker-build job runs.
+# Merges to main are blocked by GitHub branch protection if any job fails.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ── 1. Secret scanning ───────────────────────────────────────────────────
+  # Runs first — no code quality or test work starts until secrets are clean.
+  secret-scan:
+    name: Secret scanning
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # required by gitleaks-action on pull_request events
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history required for gitleaks to scan all commits,
+          # not just the HEAD checkout.
+          fetch-depth: 0
+
+      - name: Gitleaks — full git history scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python literal secret scan
+        # Scans .py files for hardcoded token/credential patterns.
+        # Complements gitleaks which targets all file types.
+        run: python .github/scripts/scan_secrets.py
+
+  # ── 2. Lint + type check ──────────────────────────────────────────────────
+  lint:
+    name: Lint & type check
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dev + inference deps
+        run: uv sync --group dev --group inference --frozen
+
+      - name: Ruff — style and import checks
+        run: uv run ruff check src .github/scripts tests
+
+      - name: Mypy — static type checks
+        run: uv run mypy src .github/scripts tests
+
+  # ── 3. Tests + coverage ──────────────────────────────────────────────────
+  test:
+    name: Tests (≥90% coverage)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dev + ml + inference deps
+        run: uv sync --group dev --group ml --group inference --frozen
+
+      - name: Run unit tests with coverage gate
+        run: |
+          uv run pytest tests/unit \
+            --cov=src/config \
+            --cov=src/data \
+            --cov=src/model \
+            --cov=src/training \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=90 \
+            -v
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 7
+
+  # ── 4. Docker build check ────────────────────────────────────────────────
+  # Runs only after all quality gates pass. Does NOT push the image.
+  docker-build:
+    name: Docker build (verify only)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: sicurre-ml:ci-check
+          # Use GitHub Actions cache to speed up repeated builds
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

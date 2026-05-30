@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "type": "command",
+        "command": "uv run python .github/scripts/hooks/stop_zero_errors.py",
+        "timeout": 60
+      }
+    ]
+  }
+}
