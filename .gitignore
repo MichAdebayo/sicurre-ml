@@ -24,10 +24,6 @@ tasks/
 sample_*.md
 *temp/
 *tmp/
-
-# Deploy folder contains server-side configs and credentials.
-# Never commit this — copy files to the server manually.
-# See deploy/README.md for setup instructions.
 deploy/.env
 deploy/README.md
 *tasks/
