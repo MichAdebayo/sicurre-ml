@@ -1,4 +1,3 @@
-"""Evaluation helpers for the Sicurre classifier."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,14 +13,14 @@ if TYPE_CHECKING:
 
 
 def evaluate_on_test(
-    trainer: "Trainer",
+    trainer: Trainer,
     test_dataset: Any,
     metric_key_prefix: str = "test",
 ) -> dict[str, float]:
-    """Evaluate on test_dataset using trainer.evaluate() and return prefixed metrics.
+    """Evaluate trainer on a held-out split and return the metrics dict.
 
-    Removes EarlyStoppingCallback before evaluation to prevent it from
-    interfering with the evaluation loop.
+    Drops EarlyStoppingCallback before evaluation so it does not interfere
+    with the final scoring pass.
     """
     from transformers import EarlyStoppingCallback
 
@@ -31,7 +30,8 @@ def evaluate_on_test(
         if not isinstance(cb, EarlyStoppingCallback)
     ]
     metrics: dict[str, float] = trainer.evaluate(
-        eval_dataset=test_dataset, metric_key_prefix=metric_key_prefix
+        eval_dataset=test_dataset,
+        metric_key_prefix=metric_key_prefix,
     )
     return metrics
 
@@ -41,12 +41,13 @@ def build_error_dataframe(
     raw_predictions: np.ndarray,
     id2label: dict[int, str] | None = None,
 ) -> pd.DataFrame:
-    """Return test_df extended with prediction columns and per-class probabilities."""
+    """Annotate test_df with predictions, per-class probabilities, and a correctness flag."""
     from scipy.special import softmax as sp_softmax
 
     label_map = id2label or ID2LABEL
     probs = sp_softmax(raw_predictions, axis=-1)
     pred_labels = np.argmax(raw_predictions, axis=-1)
+
     result = test_df.copy()
     result["predicted"] = pred_labels
     result["pred_label_name"] = result["predicted"].map(label_map)
@@ -64,7 +65,7 @@ def confusion_matrix_arrays(
     pred_labels: np.ndarray,
     num_labels: int = 3,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (counts_cm, row-normalised_cm) for the num_labels-class classifier."""
+    """Return (raw counts, row-normalised) confusion matrix pair."""
     from sklearn.metrics import confusion_matrix
 
     cm = confusion_matrix(true_labels, pred_labels, labels=list(range(num_labels)))
@@ -78,7 +79,7 @@ def save_classification_report(
     output_dir: Path,
     id2label: dict[int, str] | None = None,
 ) -> Path:
-    """Write sklearn classification_report to output_dir/classification_report.txt."""
+    """Write a text classification report to output_dir/classification_report.txt."""
     from sklearn.metrics import classification_report
 
     label_map = id2label or ID2LABEL

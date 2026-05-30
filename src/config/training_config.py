@@ -47,6 +47,7 @@ class TrainingConfig:
     phishing_boost: float = 2.0
     gamma: float = 1.5
     mlflow_model_name: str = "main.sicurre.phishing-detector"
+    promotion_tolerance: float = 0.0
 
 
 @dataclass(slots=True)
@@ -96,24 +97,55 @@ def load_secrets(runtime_env: RuntimeEnv) -> dict[str, str | None]:
     secrets = _empty_secrets()
 
     if runtime_env == "kaggle":
-        from kaggle_secrets import UserSecretsClient
-
-        client = UserSecretsClient()
+        # CI push: GitHub secrets are injected as os.environ in a prepended cell
+        # before this code runs.  Interactive run: fall back to UserSecretsClient.
+        _usk: object = None
+        _usk_init = False
+        missing: list[str] = []
         for key in _SECRET_KEYS:
-            try:
-                secrets[key] = client.get_secret(key)
-            except Exception:
+            if os.environ.get(key):
+                secrets[key] = os.environ[key]
+                continue
+            if not _usk_init:
+                try:
+                    from kaggle_secrets import UserSecretsClient
+
+                    _usk = UserSecretsClient()
+                except Exception:
+                    pass
+                _usk_init = True
+            if _usk is not None:
+                try:
+                    secrets[key] = _usk.get_secret(key)  # type: ignore[attr-defined]
+                except Exception:
+                    secrets[key] = None
+                    missing.append(key)
+            else:
                 secrets[key] = None
+                missing.append(key)
+        if missing:
+            print(
+                f"[secrets] WARNING: {len(missing)} secret(s) not available: {missing}\n"
+                "         → CI push: verify all 7 secrets are set in GitHub repo secrets.\n"
+                "         → Interactive: attach in Kaggle UI → Environment → Secrets."
+            )
         return secrets
 
     if runtime_env == "colab":
         from google.colab import userdata
 
+        missing = []
         for key in _SECRET_KEYS:
             try:
                 secrets[key] = userdata.get(key)
             except Exception:
                 secrets[key] = None
+                missing.append(key)
+        if missing:
+            print(
+                f"[secrets] WARNING: {len(missing)} secret(s) not found "
+                f"in Colab userdata: {missing}"
+            )
         return secrets
 
     load_dotenv()
@@ -124,7 +156,9 @@ def load_secrets(runtime_env: RuntimeEnv) -> dict[str, str | None]:
 
 def create_training_config(device: str) -> TrainingConfig:
     return TrainingConfig(
-        batch_size=16 if device == "cuda" else 8, use_fp16=device == "cuda"
+        batch_size=16 if device == "cuda" else 8,
+        use_fp16=device == "cuda",
+        promotion_tolerance=float(os.getenv("PROMOTION_TOLERANCE", "0.0")),
     )
 
 
