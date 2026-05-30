@@ -4,8 +4,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from src.config.training_config import (
-    TrainingConfig,
-    RuntimeState,
     _resolve_data_dir,
     _resolve_output_dir,
     build_runtime_state,

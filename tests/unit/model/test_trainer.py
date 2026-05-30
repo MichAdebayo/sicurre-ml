@@ -1,7 +1,5 @@
-import tempfile
 
 import torch
-import pytest
 
 from src.model.trainer import WeightedTrainer
 

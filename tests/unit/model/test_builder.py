@@ -3,8 +3,8 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from src.model.builder import compute_class_weights, load_model
 from src.config.training_config import TrainingConfig
+from src.model.builder import compute_class_weights, load_model
 
 
 def test_compute_class_weights_normalizes_values() -> None:

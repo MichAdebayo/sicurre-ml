@@ -1,7 +1,6 @@
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 
 from src.data.tokenizer import build_dataset_dict, load_tokenizer, tokenize_batch
 

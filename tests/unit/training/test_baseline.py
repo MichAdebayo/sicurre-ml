@@ -2,9 +2,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 
-from src.config.training_config import TrainingConfig, RuntimeState
+from src.config.training_config import RuntimeState, TrainingConfig
 from src.training.baseline import build_run_config
 
 
