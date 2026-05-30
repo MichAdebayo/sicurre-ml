@@ -66,13 +66,16 @@ jobs:
           version: "latest"
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dev + inference deps
-        run: uv sync --group dev --group inference --frozen
+      - name: Install dev + ml + inference deps
+        run: uv sync --group dev --group ml --group inference --frozen
 
       - name: Run unit tests with coverage gate
         run: |
           uv run pytest tests/unit \
-            --cov=src \
+            --cov=src/config \
+            --cov=src/data \
+            --cov=src/model \
+            --cov=src/training \
             --cov-report=xml \
             --cov-report=term-missing \
             --cov-fail-under=90 \

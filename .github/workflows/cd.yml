@@ -63,9 +63,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # ── 4. Copy updated compose file to server ───────────────────────────
-      # docker-compose.prod.yml is versioned in git. We sync it to the server
-      # so the deploy step always uses the version that matches this commit.
+      # ── 4. Copy versioned config files to server ─────────────────────────
+      # docker-compose.prod.yml, deploy/alloy/config.alloy, and
+      # deploy/nginx/api.sicurre.com.conf are all versioned in git.
+      # Syncing them here ensures the server always runs the version that
+      # matches this commit — no manual file copying needed.
       - name: Copy docker-compose.prod.yml to server
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -74,6 +76,16 @@ jobs:
           key: ${{ secrets.HETZNER_SSH_KEY }}
           source: "docker-compose.prod.yml"
           target: ${{ secrets.DEPLOY_PATH }}
+
+      - name: Copy Alloy config to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          source: "deploy/alloy/config.alloy"
+          target: ${{ secrets.DEPLOY_PATH }}
+          strip_components: 0
 
       # ── 5. Deploy on Hetzner ─────────────────────────────────────────────
       - name: Deploy
@@ -96,10 +108,17 @@ jobs:
               echo "IMAGE_TAG=${{ steps.tag.outputs.tag }}" >> .env
             fi
 
+            # Authenticate to GHCR on the server so docker pull works for
+            # private images. GITHUB_TOKEN is passed in from CI secrets.
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
             # Pull the new app image and restart containers.
             # --remove-orphans cleans up containers from removed services.
             docker compose -f docker-compose.prod.yml pull app
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            # Remove dangling images to prevent disk fill-up over time.
+            docker image prune -f
         env:
           IMAGE_TAG: ${{ steps.tag.outputs.tag }}
           REGISTRY: ${{ env.REGISTRY }}
