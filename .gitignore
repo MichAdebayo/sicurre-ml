@@ -30,3 +30,4 @@ sample_*.md
 # See deploy/README.md for setup instructions.
 deploy/.env
 deploy/README.md
+*tasks/
