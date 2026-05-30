@@ -12,31 +12,14 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  # ── 1. Lint + type check ──────────────────────────────────────────────────
-  lint:
-    name: Lint & type check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v5
-        with:
-          version: "latest"
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install dev + inference deps
-        run: uv sync --group dev --group inference --frozen
-
-      - name: Ruff — style and import checks
-        run: uv run ruff check src .github/scripts tests
-
-      - name: Mypy — static type checks
-        run: uv run mypy src .github/scripts tests
-
-  # ── 2. Secret scanning ───────────────────────────────────────────────────
+  # ── 1. Secret scanning ───────────────────────────────────────────────────
+  # Runs first — no code quality or test work starts until secrets are clean.
   secret-scan:
     name: Secret scanning
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read   # required by gitleaks-action on pull_request events
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,10 +37,33 @@ jobs:
         # Complements gitleaks which targets all file types.
         run: python .github/scripts/scan_secrets.py
 
+  # ── 2. Lint + type check ──────────────────────────────────────────────────
+  lint:
+    name: Lint & type check
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dev + inference deps
+        run: uv sync --group dev --group inference --frozen
+
+      - name: Ruff — style and import checks
+        run: uv run ruff check src .github/scripts tests
+
+      - name: Mypy — static type checks
+        run: uv run mypy src .github/scripts tests
+
   # ── 3. Tests + coverage ──────────────────────────────────────────────────
   test:
     name: Tests (≥90% coverage)
     runs-on: ubuntu-latest
+    needs: lint
     steps:
       - uses: actions/checkout@v4
 
@@ -90,11 +96,11 @@ jobs:
           retention-days: 7
 
   # ── 4. Docker build check ────────────────────────────────────────────────
-  # Runs only after lint and test pass. Does NOT push the image.
+  # Runs only after all quality gates pass. Does NOT push the image.
   docker-build:
     name: Docker build (verify only)
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: test
     steps:
       - uses: actions/checkout@v4
 
