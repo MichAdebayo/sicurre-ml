@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import cast
 
 import pandas as pd
 import pytest
@@ -46,6 +47,7 @@ def test_summarize_split_returns_correct_structure() -> None:
     frame = pd.DataFrame({"text": ["a", "b", "c"], "label": [0, 1, 0]})
     result = summarize_split(frame, {0: "phishing", 1: "spam", 2: "legitimate"})
     assert result["rows"] == 3
-    assert result["distribution"]["phishing"] == 2
-    assert result["distribution"]["spam"] == 1
+    distribution = cast(dict[str, int], result["distribution"])
+    assert distribution["phishing"] == 2
+    assert distribution["spam"] == 1
 

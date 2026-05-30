@@ -80,5 +80,6 @@ def test_weighted_trainer_compute_loss_without_class_weights(tmp_path) -> None:
         "input_ids": torch.zeros(2, 5, dtype=torch.long),
         "labels": torch.tensor([0, 1]),
     }
-    loss = trainer.compute_loss(model, inputs)
-    assert loss.item() >= 0
+    output = trainer.compute_loss(model, inputs)
+    assert isinstance(output, torch.Tensor)
+    assert output.item() >= 0
