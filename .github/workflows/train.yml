@@ -1,0 +1,183 @@
+name: Trigger Kaggle Retraining
+
+# Runs when src/ or the training notebook changes on mlops,
+# or manually via the GitHub Actions UI.
+on:
+  workflow_dispatch:
+    inputs:
+      training_dataset:
+        description: "Kaggle dataset slug for training data (overrides secret)"
+        required: false
+        default: ""
+  push:
+    branches: [mlops]
+    paths:
+      - "src/config/**"
+      - "src/data/**"
+      - "src/model/**"
+      - "src/training/**"
+      - "src/registry/**"
+      - "ml/kaggle_training.ipynb"
+      - ".github/workflows/train.yml"
+
+env:
+  PYTHON_VERSION: "3.12"
+  SRC_DATASET_SLUG: ${{ secrets.KAGGLE_USERNAME }}/sicurre-ml-src
+  KERNEL_SLUG: ${{ secrets.KAGGLE_USERNAME }}/sicurre-training
+
+jobs:
+  sync-and-retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Kaggle CLI
+        run: pip install kaggle
+
+      - name: Configure Kaggle credentials
+        run: |
+          # New Kaggle CLI config dir is ~/.config/kaggle/ (not ~/.kaggle/)
+          mkdir -p ~/.config/kaggle
+          printf '{"username":"%s","key":"%s"}\n' \
+            "${{ secrets.KAGGLE_USERNAME }}" \
+            "${{ secrets.KAGGLE_API_TOKEN }}" > ~/.config/kaggle/kaggle.json
+          chmod 600 ~/.config/kaggle/kaggle.json
+
+      # ── 1. Upload src/ as a new Kaggle dataset version ───────────────
+      - name: Upload src/ to Kaggle dataset
+        run: |
+          STAGING=$(mktemp -d)
+          # Zip src/ preserving the src/ prefix so the notebook can extract
+          # directly and find src/config/training_config.py at the expected path.
+          zip -r "$STAGING/src.zip" src/
+          cat > "$STAGING/dataset-metadata.json" <<EOF
+          {
+            "title": "sicurre-ml-src",
+            "id": "${{ env.SRC_DATASET_SLUG }}",
+            "licenses": [{"name": "CC0-1.0"}]
+          }
+          EOF
+          # No --dir-mode flag: STAGING contains only files (src.zip + metadata),
+          # no subdirectories to zip.
+          kaggle datasets version \
+            -p "$STAGING" \
+            -m "src update — ${{ github.sha }}"
+
+      # ── 2. Push notebook to Kaggle and trigger a new run ─────────────
+      - name: Push notebook and trigger training run
+        env:
+          KAGGLE_TRAINING_DATASET: ${{ inputs.training_dataset || secrets.KAGGLE_TRAINING_DATASET }}
+          DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+          DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+          DATABRICKS_EMAIL: ${{ secrets.DATABRICKS_EMAIL }}
+          MLFLOW_EXPERIMENT_NAME: ${{ secrets.MLFLOW_EXPERIMENT_NAME }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          REPO_NAME: ${{ secrets.REPO_NAME }}
+          PROMOTION_TOLERANCE: ${{ secrets.PROMOTION_TOLERANCE }}
+        run: |
+          STAGING=$(mktemp -d)
+          cp ml/kaggle_training.ipynb "$STAGING/notebook.ipynb"
+
+          # Inject GitHub secrets as os.environ in a prepended notebook cell.
+          # UserSecretsClient only works in interactive (Kaggle UI) runs;
+          # API-triggered (kaggle kernels push) runs cannot access it.
+          cat > /tmp/inject_secrets.py << 'PYEOF'
+          import json, os, sys
+
+          KEYS = (
+              "DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_EMAIL",
+              "MLFLOW_EXPERIMENT_NAME", "HF_TOKEN", "HF_USERNAME", "REPO_NAME",
+              "PROMOTION_TOLERANCE",
+          )
+
+          path = sys.argv[1]
+          nb = json.load(open(path))
+
+          lines = ["import os\n"]
+          injected = 0
+          for k in KEYS:
+              v = os.environ.get(k, "")
+              if v:
+                  lines.append(f"os.environ[{json.dumps(k)}] = {json.dumps(v)}\n")
+                  injected += 1
+          lines.append('print("[ci-secrets] CI-injected environment secrets loaded.")\n')
+
+          nb["cells"].insert(0, {
+              "cell_type": "code",
+              "execution_count": None,
+              "metadata": {},
+              "outputs": [],
+              "source": lines,
+          })
+
+          json.dump(nb, open(path, "w"))
+          print(f"[ci-secrets] Notebook patched: {injected} of {len(KEYS)} secrets injected.")
+          PYEOF
+          python3 /tmp/inject_secrets.py "$STAGING/notebook.ipynb"
+
+          cat > "$STAGING/kernel-metadata.json" <<EOF
+          {
+            "id": "${{ env.KERNEL_SLUG }}",
+            "title": "sicurre-training",
+            "code_file": "notebook.ipynb",
+            "language": "python",
+            "kernel_type": "notebook",
+            "is_private": "true",
+            "enable_gpu": "true",
+            "enable_tpu": "false",
+            "enable_internet": "true",
+            "machine_shape": "T4 x2",
+            "dataset_sources": [
+              "${{ env.SRC_DATASET_SLUG }}",
+              "${KAGGLE_TRAINING_DATASET}"
+            ]
+          }
+          EOF
+          cd "$STAGING" && kaggle kernels push -p .
+
+      # ── 3. Poll until the run completes or fails ──────────────────────
+      - name: Wait for training run
+        run: |
+          MAX_ATTEMPTS=90
+          SLEEP_SECS=60
+
+          for i in $(seq 1 $MAX_ATTEMPTS); do
+            RAW=$(kaggle kernels status "${{ env.KERNEL_SLUG }}" 2>&1)
+            echo "raw: $RAW"
+            STATUS=$(echo "$RAW" \
+                     | sed -n 's/.*has status "KernelWorkerStatus\.\([^"]*\)".*/\1/p' \
+                     | tr '[:upper:]' '[:lower:]' \
+                     | tr '_' ' ' | sed 's/ //g')
+            echo "[$i/$MAX_ATTEMPTS] kernel status: ${STATUS:-unknown}"
+
+            case "$STATUS" in
+              complete)
+                echo "Training completed successfully."
+                exit 0
+                ;;
+              error)
+                echo "Training failed with status: $STATUS"
+                exit 1
+                ;;
+              cancelacknowledged|cancel)
+                echo "Training cancelled with status: $STATUS"
+                exit 1
+                ;;
+            esac
+
+            sleep $SLEEP_SECS
+          done
+
+          echo "Timed out after $((MAX_ATTEMPTS * SLEEP_SECS / 60)) minutes."
+          exit 1

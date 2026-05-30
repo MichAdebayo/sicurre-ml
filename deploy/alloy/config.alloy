@@ -1,0 +1,73 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Grafana Alloy configuration — sicurre-ml
+//
+// Ships structured JSON logs from the sicurre-ml Docker Compose stack
+// to Grafana Cloud Loki.
+//
+// Fill in GRAFANA_CLOUD_LOKI_URL, GRAFANA_CLOUD_USER, and
+// GRAFANA_CLOUD_API_KEY before deploying (see deploy/README.md).
+//
+// Reference: https://grafana.com/docs/alloy/latest/
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── 1. Discover Docker container log files ────────────────────────────────
+discovery.docker "sicurre_containers" {
+  host = "unix:///var/run/docker.sock"
+
+  // Scope to containers in the sicurre-ml compose project only.
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=sicurre-ml"]
+  }
+}
+
+// ── 2. Relabel: extract container name and compose service ────────────────
+discovery.relabel "sicurre_meta" {
+  targets = discovery.docker.sicurre_containers.targets
+
+  // Add a `container` label from the Docker container name.
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  // Add a `service` label from the Docker Compose service name.
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service"
+  }
+
+  // Fixed job label to identify this stack in Loki queries.
+  rule {
+    target_label = "job"
+    replacement  = "sicurre-ml"
+  }
+}
+
+// ── 3. Scrape the log files ───────────────────────────────────────────────
+loki.source.docker "sicurre_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.sicurre_meta.output
+  forward_to = [loki.write.grafana_cloud.receiver]
+}
+
+// ── 4. Ship to Grafana Cloud Loki ────────────────────────────────────────
+loki.write "grafana_cloud" {
+  endpoint {
+    // Replace these with your Grafana Cloud Loki push URL and credentials.
+    // Find them at: https://grafana.com/profile/org → Loki → Details
+    url = "https://<GRAFANA_CLOUD_LOKI_URL>/loki/api/v1/push"
+
+    basic_auth {
+      username = "<GRAFANA_CLOUD_USER>"
+      password = "<GRAFANA_CLOUD_API_KEY>"
+    }
+  }
+
+  // Add a fixed label so all logs from this server are identifiable.
+  external_labels = {
+    env    = "production",
+    server = "hetzner-cx33",
+  }
+}

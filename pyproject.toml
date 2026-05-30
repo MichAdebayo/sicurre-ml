@@ -1,20 +1,76 @@
-# project.toml - minimal project metadata
-# Edit fields as needed for your project.
-
 [project]
 name = "sicurre-ml"
 version = "0.1.0"
-description = "Machine learning project for Sicurre"
+description = "ML training pipeline for Sicurre"
 authors = [{ name = "Michael Adebayo" }]
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.14"
+requires-python = ">=3.11,<3.13"
+# Base: only what every concern shares (secret loading used by training_config.py)
 dependencies = [
-  "python>=3.10",
+  "python-dotenv>=1.0",
+  "tldextract>=5.3.1",
+]
+
+[dependency-groups]
+# Core training stack — needed on Kaggle and for local training runs
+ml = [
+  "accelerate>=1.1",
+  "datasets>=3.0",
+  "evaluate>=0.4",
   "numpy>=1.24",
   "pandas>=2.0",
   "scikit-learn>=1.2",
+  "scipy>=1.10",
+  "sentencepiece>=0.2",
+  "torch>=2.2",
+  "transformers>=4.50",
+]
+# MLOps tooling — experiment tracking, model registry, dataset sync, visualisation
+mlops = [
+  "databricks-sdk>=0.20",
+  "huggingface-hub>=0.32",
+  "kaggle>=2.1.2",
+  "matplotlib>=3.9",
+  "mlflow-skinny>=3.0",
+  "optuna>=4.0",
+  "seaborn>=0.13",
+]
+# Inference API — FastAPI server, ONNX Runtime, URL parsing, HTTP client
+inference = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.29",
+  "onnxruntime>=1.18",
+  "transformers>=4.50",
+  "httpx>=0.27",
+  "pydantic>=2.0",
+  "slowapi>=0.1",
+  "redis>=5.0",
+]
+# Local development and CI quality gates
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.23",
+  "pytest-cov>=5.0",
+  "mypy>=1.15",
+  "ruff>=0.11",
 ]
 
-[tool.project]
-# Tool-specific configuration can go here.
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests/unit", "tests/integration", "tests/e2e"]
+addopts = ["-p", "no:langsmith", "-p", "no:langsmith_plugin"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src", ".github/scripts", "tests"]
+warn_unused_configs = true
+ignore_missing_imports = true

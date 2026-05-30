@@ -1,0 +1,161 @@
+name: CD
+
+# Deploys to production strictly on push to main.
+# CD is intentionally NOT triggered by mlops, develop, or any other branch.
+# Manual dispatch is available for emergency re-deploys without a code change.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy (defaults to latest main SHA)"
+        required: false
+        default: ""
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/sicurre-ml
+
+jobs:
+  deploy:
+    name: Build → Push → Deploy → Health check
+    runs-on: ubuntu-latest
+    # Prevent concurrent deployments — only one deploy runs at a time.
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+
+    steps:
+      # ── 1. Checkout ───────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+
+      # ── 2. Authenticate to GHCR ──────────────────────────────────────────
+      # GITHUB_TOKEN is automatically available and has write:packages scope
+      # for the current repository. No additional secret needed.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 3. Build and push Docker image ───────────────────────────────────
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Resolve image tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.image_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── 4. Copy versioned config files to server ─────────────────────────
+      # docker-compose.prod.yml, deploy/alloy/config.alloy, and
+      # deploy/nginx/api.sicurre.com.conf are all versioned in git.
+      # Syncing them here ensures the server always runs the version that
+      # matches this commit — no manual file copying needed.
+      - name: Copy docker-compose.prod.yml to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          source: "docker-compose.prod.yml"
+          target: ${{ secrets.DEPLOY_PATH }}
+
+      - name: Copy Alloy config to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          source: "deploy/alloy/config.alloy"
+          target: ${{ secrets.DEPLOY_PATH }}
+          strip_components: 0
+
+      # ── 5. Deploy on Hetzner ─────────────────────────────────────────────
+      - name: Deploy
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          envs: IMAGE_TAG,REGISTRY,IMAGE_NAME
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+
+            # Inject the image tag into the environment for docker compose.
+            # The .env file on the server holds all app secrets (managed manually).
+            # We only update IMAGE_TAG here — never app secrets.
+            if grep -q '^IMAGE_TAG=' .env 2>/dev/null; then
+              sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${{ steps.tag.outputs.tag }}|" .env
+            else
+              echo "IMAGE_TAG=${{ steps.tag.outputs.tag }}" >> .env
+            fi
+
+            # Authenticate to GHCR on the server so docker pull works for
+            # private images. GITHUB_TOKEN is passed in from CI secrets.
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            # Pull the new app image and restart containers.
+            # --remove-orphans cleans up containers from removed services.
+            docker compose -f docker-compose.prod.yml pull app
+            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            # Remove dangling images to prevent disk fill-up over time.
+            docker image prune -f
+        env:
+          IMAGE_TAG: ${{ steps.tag.outputs.tag }}
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+
+      # ── 6. Post-deploy health check ──────────────────────────────────────
+      # Polls /v1/health every 10 s for up to 5 minutes.
+      # The /v1/ready check (model download) is intentionally separate and
+      # may take longer on a cold start with a fresh ONNX cache.
+      - name: Wait for health endpoint
+        run: |
+          echo "Waiting for https://api.sicurre.com/v1/health ..."
+          for i in $(seq 1 30); do
+            http_status=$(curl -sf -o /dev/null -w "%{http_code}" \
+              https://api.sicurre.com/v1/health 2>/dev/null || echo "000")
+            if [ "$http_status" = "200" ]; then
+              echo "Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i/30: status=$http_status — retrying in 10s..."
+            sleep 10
+          done
+          echo "Service failed to become healthy after 5 minutes."
+          exit 1
+
+      - name: Confirm model ready endpoint
+        run: |
+          echo "Waiting for https://api.sicurre.com/v1/ready ..."
+          for i in $(seq 1 36); do
+            http_status=$(curl -sf -o /dev/null -w "%{http_code}" \
+              https://api.sicurre.com/v1/ready 2>/dev/null || echo "000")
+            if [ "$http_status" = "200" ]; then
+              echo "Model ready (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i/36: status=$http_status — retrying in 10s..."
+            sleep 10
+          done
+          echo "Model did not become ready after 6 minutes."
+          exit 1
