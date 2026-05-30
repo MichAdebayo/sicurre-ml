@@ -38,6 +38,7 @@ jobs:
       packages: write
     outputs:
       image_name: ${{ steps.image.outputs.name }}
+      image_owner: ${{ steps.image.outputs.owner }}
       image_tag: ${{ steps.tag.outputs.tag }}
 
     steps:
@@ -51,7 +52,10 @@ jobs:
       # github.repository returns mixed-case (e.g. "MichAdebayo/sicurre-ml").
       - name: Lowercase image name
         id: image
-        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+        run: |
+          owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "owner=${owner}" >> "$GITHUB_OUTPUT"
+          echo "name=${owner}/sicurre-ml" >> "$GITHUB_OUTPUT"
 
       - name: Resolve image tag
         id: tag
@@ -130,12 +134,17 @@ jobs:
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
 
-            # Write the new image tag into .env so docker compose resolves it.
-            # Only IMAGE_TAG is touched — app secrets are managed separately.
+            # Write IMAGE_TAG and GHCR_OWNER into .env so docker compose resolves them.
+            # Only these two deployment vars are touched — app secrets are managed separately.
             if grep -q '^IMAGE_TAG=' .env 2>/dev/null; then
               sed -i "s|^IMAGE_TAG=.*|IMAGE_TAG=${{ needs.build-push.outputs.image_tag }}|" .env
             else
               echo "IMAGE_TAG=${{ needs.build-push.outputs.image_tag }}" >> .env
+            fi
+            if grep -q '^GHCR_OWNER=' .env 2>/dev/null; then
+              sed -i "s|^GHCR_OWNER=.*|GHCR_OWNER=${{ needs.build-push.outputs.image_owner }}|" .env
+            else
+              echo "GHCR_OWNER=${{ needs.build-push.outputs.image_owner }}" >> .env
             fi
 
             # Authenticate to GHCR so docker pull can reach the private image.
