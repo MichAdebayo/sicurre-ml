@@ -197,7 +197,8 @@ jobs:
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
           script: |
-            for i in $(seq 1 36); do
+            # Increase ready timeout to 15 minutes to allow cold-start model download/load.
+            for i in $(seq 1 90); do
               http_status=$(curl -s -o /dev/null -w "%{http_code}" \
                 http://127.0.0.1:8001/v1/ready 2>/dev/null)
               http_status=${http_status:-000}
@@ -205,8 +206,8 @@ jobs:
                 echo "Model ready (attempt $i)"
                 exit 0
               fi
-              echo "Attempt $i/36: status=$http_status — retrying in 10s..."
+              echo "Attempt $i/90: status=$http_status — retrying in 10s..."
               sleep 10
             done
-            echo "Model did not become ready after 6 minutes."
+            echo "Model did not become ready after 15 minutes."
             exit 1
