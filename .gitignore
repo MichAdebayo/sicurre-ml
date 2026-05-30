@@ -1,6 +1,7 @@
 .env
 .venv/
 __pycache__/
+relay.md
 *.pyc
 *.pyo
 
@@ -9,6 +10,10 @@ __pycache__/
 
 sicurre-*.ipynb
 sicurre-*.md
+
+tasks/
+docs/
+
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
@@ -16,3 +21,9 @@ sicurre-*.md
 .vscode/
 docs/
 tasks/
+sample_*.md
+*temp/
+*tmp/
+deploy/.env
+deploy/README.md
+*tasks/
