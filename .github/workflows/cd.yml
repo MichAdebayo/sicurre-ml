@@ -189,24 +189,24 @@ jobs:
             exit 1
 
       # Model-ready check — may take longer on cold start (fresh ONNX cache).
-      # Polls 127.0.0.1:8001/v1/ready every 10 s for up to 6 minutes.
+      # Polls 127.0.0.1:8001/v1/ready every 10 s for up to 15 minutes.
       - name: Confirm /v1/ready (via server localhost)
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.HETZNER_HOST }}
           username: ${{ secrets.HETZNER_USER }}
           key: ${{ secrets.HETZNER_SSH_KEY }}
+          # Must be longer than the poll loop (90 × 10s = 15 min).
+          command_timeout: 20m
           script: |
-            # Increase ready timeout to 15 minutes to allow cold-start model download/load.
             for i in $(seq 1 90); do
-              http_status=$(curl -s -o /dev/null -w "%{http_code}" \
-                http://127.0.0.1:8001/v1/ready 2>/dev/null)
-              http_status=${http_status:-000}
-              if [ "$http_status" = "200" ]; then
+              response=$(curl -s http://127.0.0.1:8001/v1/ready 2>/dev/null)
+              http_status=$(echo "$response" | grep -o '"status":"ready"' | wc -l | tr -d ' ')
+              if [ "$http_status" = "1" ]; then
                 echo "Model ready (attempt $i)"
                 exit 0
               fi
-              echo "Attempt $i/90: status=$http_status — retrying in 10s..."
+              echo "Attempt $i/90: $response — retrying in 10s..."
               sleep 10
             done
             echo "Model did not become ready after 15 minutes."
