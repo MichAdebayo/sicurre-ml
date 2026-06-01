@@ -124,6 +124,16 @@ jobs:
           target: ${{ secrets.DEPLOY_PATH }}
           strip_components: 0
 
+      - name: Copy nginx vhost config to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          source: "deploy/nginx/api.sicurre.com.conf"
+          target: ${{ secrets.DEPLOY_PATH }}
+          strip_components: 0
+
       - name: Pull image and restart containers
         uses: appleboy/ssh-action@v1
         with:
@@ -152,6 +162,19 @@ jobs:
 
             docker compose -f docker-compose.prod.yml pull app
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            # Install/reload api.sicurre.com vhost in the running nginx container.
+            # This avoids sudo on host-level nginx paths and keeps deploy non-interactive.
+            if docker ps --format '{{.Names}} {{.Image}}' | grep -Eq 'nginx'; then
+              NGINX_CONTAINER=$(docker ps --format '{{.Names}} {{.Image}}' | awk '$2 ~ /nginx/ {print $1; exit}')
+              if [ -n "$NGINX_CONTAINER" ]; then
+                docker cp deploy/nginx/api.sicurre.com.conf "$NGINX_CONTAINER:/etc/nginx/conf.d/api.sicurre.com.conf"
+                docker exec "$NGINX_CONTAINER" nginx -t
+                docker exec "$NGINX_CONTAINER" nginx -s reload
+              fi
+            else
+              echo "No running nginx container found; skipped vhost install/reload."
+            fi
 
             # Remove dangling images to prevent disk fill-up over time.
             docker image prune -f
