@@ -25,6 +25,9 @@ services:
     env_file: .env
     environment:
       REDIS_URL: "redis://redis:6379"
+      # huggingface_hub writes lock/temp files to $HF_HOME.
+      # The sicurre system user has no home dir, so redirect to the writable cache volume.
+      HF_HOME: "/tmp/sicurre_onnx"
     depends_on:
       redis:
         condition: service_healthy
