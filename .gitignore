@@ -26,4 +26,10 @@ sample_*.md
 *tmp/
 deploy/.env
 deploy/README.md
+# Cloudflare Origin CA certs — never commit private keys
+deploy/nginx/ssl/
 *tasks/
+vinse_relay.md
+deploy/nginx/README.md
+tmp/
+temp/

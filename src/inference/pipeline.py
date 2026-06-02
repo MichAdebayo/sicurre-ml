@@ -1,10 +1,10 @@
 """Composite inference pipeline — orchestrates all four stages.
 
 Stage weights (configurable via env):
-  WEIGHT_RULES      default 0.15
+    WEIGHT_RULES      default 0.10
   WEIGHT_BLOCKLIST  default 0.25
-  WEIGHT_ONNX       default 0.40
-  WEIGHT_LLM        default 0.20
+    WEIGHT_ONNX       default 0.20
+    WEIGHT_LLM        default 0.45
 
 A stage that produces no signal (e.g. no URLs for rules, LLM failure) has
 its weight redistributed proportionally to the stages that did run.
@@ -46,6 +46,14 @@ def _phishing_score(label: str, confidence: float) -> float:
     return 1.0 - confidence
 
 
+def _onnx_phishing_score(result: OnnxResult) -> float:
+    """Map the 3-class ONNX output to a binary phishing probability."""
+    phishing_prob = result.raw_scores.get("phishing")
+    if phishing_prob is not None:
+        return float(phishing_prob)
+    return _phishing_score(result.label, result.confidence)
+
+
 def run_pipeline(
     text: str,
     use_virustotal: bool = False,
@@ -65,10 +73,10 @@ def run_pipeline(
         is a concern for a specific request).
     """
     # Stage weights
-    w_rules = _env_float("WEIGHT_RULES", 0.15)
+    w_rules = _env_float("WEIGHT_RULES", 0.10)
     w_block = _env_float("WEIGHT_BLOCKLIST", 0.25)
-    w_onnx = _env_float("WEIGHT_ONNX", 0.40)
-    w_llm = _env_float("WEIGHT_LLM", 0.20)
+    w_onnx = _env_float("WEIGHT_ONNX", 0.20)
+    w_llm = _env_float("WEIGHT_LLM", 0.45)
 
     stage_scores: dict[str, float] = {}
     stage_labels: dict[str, str] = {}
@@ -98,15 +106,11 @@ def run_pipeline(
         stage_scores["blocklist"] = score
         stage_labels["blocklist"] = "phishing" if block_res.is_known_phishing else "safe"
         active_weights["blocklist"] = w_block
-    else:
-        # Clean result still participates with low phishing score
-        stage_scores["blocklist"] = 0.0
-        stage_labels["blocklist"] = "safe"
-        active_weights["blocklist"] = w_block
+    # A clean blocklist miss is neutral evidence, so it is omitted.
 
     # ── Stage 3: ONNX ────────────────────────────────────────────────────────
     onnx_res: OnnxResult = classify_onnx(text)
-    stage_scores["onnx"] = _phishing_score(onnx_res.label, onnx_res.confidence)
+    stage_scores["onnx"] = _onnx_phishing_score(onnx_res)
     stage_labels["onnx"] = onnx_res.label
     active_weights["onnx"] = w_onnx
 

@@ -20,7 +20,9 @@ services:
     image: ghcr.io/${GHCR_OWNER}/sicurre-ml:${IMAGE_TAG:-latest}
     restart: unless-stopped
     ports:
-      # Bind only to loopback — nginx fronts this, nothing reaches it directly.
+      # Bound to loopback only — nginx-proxy uses network_mode: host so it reaches
+      # 127.0.0.1:8001 directly. Port 8001 is not reachable from the internet;
+      # block it at the Hetzner firewall.
       - "127.0.0.1:8001:8000"
     env_file: .env
     environment:
