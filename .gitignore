@@ -31,3 +31,5 @@ deploy/nginx/ssl/
 *tasks/
 vinse_relay.md
 deploy/nginx/README.md
+tmp/
+temp/

@@ -43,6 +43,7 @@ inference = [
   "onnxruntime>=1.18",
   "transformers>=4.50",
   "httpx>=0.27",
+  "psycopg[binary]>=3.2",
   "pydantic>=2.0",
   "slowapi>=0.1",
   "redis>=5.0",
