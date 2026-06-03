@@ -44,3 +44,12 @@ def test_pipeline_uses_phishing_probability_and_skips_clean_blocklist(monkeypatc
     assert result.stage_scores["onnx"] == 0.1
     assert "blocklist" not in result.stage_scores
     assert result.llm_provider == "groq"
+    assert result.verdict == "phishing"
+    assert result.label_verdict in {"phishing", "spam", "legitimate"}
+    assert set(result.label_distribution) == {"phishing", "spam", "legitimate"}
+    assert round(sum(result.label_distribution.values()), 4) == 1.0
+    assert result.stage_weights_applied["onnx"] > 0
+    assert result.stage_weights_applied["llm"] > 0
+    assert result.stage_weights_applied.get("blocklist", 0.0) == 0.0
+    assert result.stage_breakdown["blocklist"]["active"] is False
+    assert result.stage_breakdown["llm"]["active"] is True
