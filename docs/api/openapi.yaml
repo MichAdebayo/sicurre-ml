@@ -1,0 +1,212 @@
+openapi: 3.1.0
+info:
+  title: Sicurre Inference API
+  description: "Multi-stage phishing detection \u2014 rules + blocklist + ONNX + LLM"
+  version: 0.1.0
+paths:
+  /v1/health:
+    get:
+      tags:
+      - ops
+      summary: Health
+      operationId: health_v1_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Health V1 Health Get
+  /health:
+    get:
+      tags:
+      - ops
+      summary: Health
+      operationId: health_health_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties:
+                  type: string
+                type: object
+                title: Response Health Health Get
+  /v1/metrics:
+    get:
+      tags:
+      - ops
+      summary: Metrics
+      operationId: metrics_v1_metrics_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            text/plain:
+              schema:
+                type: string
+  /v1/ready:
+    get:
+      tags:
+      - ops
+      summary: Ready
+      description: Checks that the ONNX model is loaded and the session is ready.
+      operationId: ready_v1_ready_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Ready V1 Ready Get
+  /v1/classify:
+    post:
+      tags:
+      - inference
+      summary: Classify
+      description: Run the full phishing detection pipeline on the provided text.
+      operationId: classify_v1_classify_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClassifyRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClassifyResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+      security:
+      - HTTPBearer: []
+components:
+  schemas:
+    ClassifyRequest:
+      properties:
+        text:
+          type: string
+          maxLength: 4096
+          minLength: 1
+          title: Text
+          description: Message to classify
+        use_virustotal:
+          type: boolean
+          title: Use Virustotal
+          description: Enable VirusTotal enrichment (adds latency)
+          default: false
+        use_llm:
+          type: boolean
+          title: Use Llm
+          description: Enable LLM stage
+          default: true
+      type: object
+      required:
+      - text
+      title: ClassifyRequest
+    ClassifyResponse:
+      properties:
+        verdict:
+          type: string
+          title: Verdict
+        label_verdict:
+          type: string
+          title: Label Verdict
+        is_phishing:
+          type: boolean
+          title: Is Phishing
+        composite_score:
+          type: number
+          title: Composite Score
+        stage_scores:
+          additionalProperties:
+            type: number
+          type: object
+          title: Stage Scores
+        stage_labels:
+          additionalProperties:
+            type: string
+          type: object
+          title: Stage Labels
+        label_distribution:
+          additionalProperties:
+            type: number
+          type: object
+          title: Label Distribution
+        stage_breakdown:
+          additionalProperties:
+            additionalProperties: true
+            type: object
+          type: object
+          title: Stage Breakdown
+        explanation:
+          type: string
+          title: Explanation
+        llm_provider:
+          type: string
+          title: Llm Provider
+      type: object
+      required:
+      - verdict
+      - label_verdict
+      - is_phishing
+      - composite_score
+      - stage_scores
+      - stage_labels
+      - label_distribution
+      - stage_breakdown
+      - explanation
+      - llm_provider
+      title: ClassifyResponse
+    HTTPValidationError:
+      properties:
+        detail:
+          items:
+            $ref: '#/components/schemas/ValidationError'
+          type: array
+          title: Detail
+      type: object
+      title: HTTPValidationError
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+  securitySchemes:
+    HTTPBearer:
+      type: http
+      scheme: bearer
