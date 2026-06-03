@@ -33,3 +33,13 @@ vinse_relay.md
 deploy/nginx/README.md
 tmp/
 temp/
+
+# Keep certification evidence and API contract docs versioned.
+!docs/
+docs/*
+docs/report/
+docs/report/**
+!docs/api/
+!docs/api/openapi.yaml
+docs/ops/
+docs/ops/**
