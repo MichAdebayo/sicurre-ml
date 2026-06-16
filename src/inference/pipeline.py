@@ -91,6 +91,8 @@ def _binary_to_distribution(
 
 def run_pipeline(
     text: str,
+    subject: str | None = None,
+    sender: str | None = None,
     use_virustotal: bool = False,
     use_llm: bool = True,
 ) -> ClassificationResult:
@@ -100,6 +102,10 @@ def run_pipeline(
     ----------
     text:
         Raw message text (SMS, email body, etc.)
+    subject:
+        Optional email subject used by the LLM stage for extra context.
+    sender:
+        Optional sender email/address used by the LLM stage for extra context.
     use_virustotal:
         Pass True to enable the VirusTotal enrichment in the blocklist stage.
         Adds latency; off by default.
@@ -212,7 +218,7 @@ def run_pipeline(
     }
     if use_llm:
         stage_started = time.perf_counter()
-        llm_res = classify_llm(text)
+        llm_res = classify_llm(text, sender=sender, subject=subject)
         stage_latencies_ms["llm"] = round((time.perf_counter() - stage_started) * 1000.0, 3)
     if llm_res is not None:
         stage_scores["llm"] = _phishing_score(llm_res.label, llm_res.confidence)

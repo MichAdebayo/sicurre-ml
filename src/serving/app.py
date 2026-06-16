@@ -22,8 +22,8 @@ load_dotenv()
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from src.inference.pipeline import ClassificationResult, run_pipeline  # noqa: E402
 from src.inference.onnx_classifier import get_model_version  # noqa: E402
+from src.inference.pipeline import ClassificationResult, run_pipeline  # noqa: E402
 from src.serving.telemetry import (  # noqa: E402
     emit_classify_request_log,
     observe_classify_request,
@@ -64,7 +64,9 @@ def _verify_token(
 # ---------------------------------------------------------------------------
 
 class ClassifyRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=4096, description="Message to classify")
+    subject: str = Field(default="", max_length=300, description="Email subject")
+    sender: str = Field(default="", max_length=320, description="Email sender address")
+    text: str = Field(..., min_length=1, max_length=4096, description="Email message body")
     use_virustotal: bool = Field(False, description="Enable VirusTotal enrichment (adds latency)")
     use_llm: bool = Field(True, description="Enable LLM stage")
 
@@ -136,9 +138,10 @@ def ready() -> dict[str, Any]:
 )
 def classify(request: ClassifyRequest) -> ClassifyResponse:
     """Run the full phishing detection pipeline on the provided text."""
-    from src.inference.onnx_classifier import _load_session_and_tokenizer
     import time
     from uuid import uuid4
+
+    from src.inference.onnx_classifier import _load_session_and_tokenizer
 
     request_id = str(uuid4())
     started_at = time.perf_counter()
@@ -167,6 +170,8 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
 
     result: ClassificationResult = run_pipeline(
         text=request.text,
+        subject=request.subject,
+        sender=request.sender,
         use_virustotal=request.use_virustotal,
         use_llm=request.use_llm,
     )

@@ -70,7 +70,7 @@ paths:
       tags:
       - inference
       summary: Classify
-      description: Run the full phishing detection pipeline on the provided text.
+      description: Run the full phishing detection pipeline on the provided email payload.
       operationId: classify_v1_classify_post
       requestBody:
         content:
@@ -97,12 +97,24 @@ components:
   schemas:
     ClassifyRequest:
       properties:
+        subject:
+          type: string
+          maxLength: 300
+          title: Subject
+          description: Email subject
+          default: ''
+        sender:
+          type: string
+          maxLength: 320
+          title: Sender
+          description: Email sender address
+          default: ''
         text:
           type: string
           maxLength: 4096
           minLength: 1
           title: Text
-          description: Message to classify
+          description: Email message body
         use_virustotal:
           type: boolean
           title: Use Virustotal
