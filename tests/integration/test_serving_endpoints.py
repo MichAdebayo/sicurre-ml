@@ -62,7 +62,13 @@ def test_classify_auth_and_public_contract(monkeypatch) -> None:
     response = client.post(
         "/v1/classify",
         headers={"Authorization": "Bearer test-key"},
-        json={"text": "hello", "use_virustotal": False, "use_llm": False},
+        json={
+            "subject": "Bonjour",
+            "sender": "contact@example.com",
+            "text": "hello",
+            "use_virustotal": False,
+            "use_llm": False,
+        },
     )
 
     assert response.status_code == 200
