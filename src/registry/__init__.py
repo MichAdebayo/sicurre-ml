@@ -130,6 +130,8 @@ def promote_if_threshold(
 
     try:
         prod_mv = client.get_model_version_by_alias(model_name, "production")
+        if prod_mv.run_id is None:
+            raise ValueError("Production model version has no associated MLflow run")
         prod_run = client.get_run(prod_mv.run_id)
         prod_metrics = prod_run.data.metrics
         fetched_recall = prod_metrics.get("test_phishing_recall")
