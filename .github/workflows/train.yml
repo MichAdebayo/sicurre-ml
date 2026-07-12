@@ -9,6 +9,11 @@ on:
         description: "Kaggle dataset slug for training data (overrides secret)"
         required: false
         default: ""
+      validate_only:
+        description: "Validate the receiver contract without starting Kaggle training"
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [mlops]
     paths:
@@ -25,9 +30,58 @@ env:
   SRC_DATASET_SLUG: ${{ secrets.KAGGLE_USERNAME }}/sicurre-ml-src
   KERNEL_SLUG: ${{ secrets.KAGGLE_USERNAME }}/sicurre-training
 
+permissions:
+  contents: read
+
+concurrency:
+  group: kaggle-training-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  validate-dispatch:
+    name: Validate receiver contract
+    runs-on: ubuntu-latest
+    outputs:
+      training_dataset: ${{ steps.contract.outputs.training_dataset }}
+    steps:
+      - name: Validate trigger and dataset input
+        id: contract
+        env:
+          DISPATCH_DATASET: ${{ inputs.training_dataset }}
+          FALLBACK_DATASET: ${{ secrets.KAGGLE_TRAINING_DATASET }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -z "$DISPATCH_DATASET" ]; then
+              echo "training_dataset is required for workflow_dispatch." >&2
+              exit 1
+            fi
+            dataset="$DISPATCH_DATASET"
+          else
+            dataset="$FALLBACK_DATASET"
+          fi
+          if ! printf '%s' "$dataset" | grep -Eq '^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$'; then
+            echo "training_dataset must use owner/dataset-slug format." >&2
+            exit 1
+          fi
+          echo "training_dataset=$dataset" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Dataset dispatch receiver"
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Trigger | \`${{ github.event_name }}\` |"
+            echo "| Dataset | \`$dataset\` |"
+            echo "| Source ref | \`${{ github.ref_name }}\` |"
+            echo "| Source SHA | \`${{ github.sha }}\` |"
+            echo "| Kaggle kernel | \`${{ env.KERNEL_SLUG }}\` |"
+            echo "| Validate only | \`${{ inputs.validate_only || false }}\` |"
+            echo "| Contract result | **accepted** |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   sync-and-retrain:
     runs-on: ubuntu-latest
+    needs: validate-dispatch
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.validate_only != true }}
     timeout-minutes: 120
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
@@ -76,7 +130,7 @@ jobs:
       # ── 2. Push notebook to Kaggle and trigger a new run ─────────────
       - name: Push notebook and trigger training run
         env:
-          KAGGLE_TRAINING_DATASET: ${{ inputs.training_dataset || secrets.KAGGLE_TRAINING_DATASET }}
+          KAGGLE_TRAINING_DATASET: ${{ needs.validate-dispatch.outputs.training_dataset }}
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
           DATABRICKS_EMAIL: ${{ secrets.DATABRICKS_EMAIL }}
@@ -181,3 +235,17 @@ jobs:
 
           echo "Timed out after $((MAX_ATTEMPTS * SLEEP_SECS / 60)) minutes."
           exit 1
+
+      - name: Record final training result
+        if: always()
+        run: |
+          {
+            echo "## Kaggle training result"
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Dataset | \`${{ needs.validate-dispatch.outputs.training_dataset }}\` |"
+            echo "| Source ref | \`${{ github.ref_name }}\` |"
+            echo "| Source SHA | \`${{ github.sha }}\` |"
+            echo "| Kaggle kernel | \`${{ env.KERNEL_SLUG }}\` |"
+            echo "| Final result | **${{ job.status }}** |"
+          } >> "$GITHUB_STEP_SUMMARY"
