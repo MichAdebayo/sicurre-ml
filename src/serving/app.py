@@ -17,6 +17,13 @@ from typing import Any
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Security, status
 from fastapi.responses import PlainTextResponse
+from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 
 load_dotenv()
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer  # noqa: E402
@@ -35,6 +42,35 @@ app = FastAPI(
     description="Multi-stage phishing detection — rules + blocklist + ONNX + LLM",
     version="0.1.0",
 )
+
+
+def _configure_tracing() -> None:
+    ratio = min(max(float(os.getenv("OTEL_TRACE_SAMPLE_RATIO", "0.05")), 0.0), 1.0)
+    provider = TracerProvider(
+        resource=Resource.create(
+            {
+                "service.name": "sicurre-ml-inference",
+                "deployment.environment.name": os.getenv("DEPLOYMENT_ENV", "production"),
+            }
+        ),
+        sampler=ParentBased(TraceIdRatioBased(ratio)),
+    )
+    provider.add_span_processor(
+        BatchSpanProcessor(
+            OTLPSpanExporter(
+                endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://alloy:4317"),
+                insecure=os.getenv("OTEL_EXPORTER_OTLP_INSECURE", "true").lower() == "true",
+            )
+        )
+    )
+    trace.set_tracer_provider(provider)
+    FastAPIInstrumentor.instrument_app(
+        app,
+        excluded_urls=r"(^|/)(health|ready|metrics|docs|redoc|openapi\.json)$",
+    )
+
+
+_configure_tracing()
 
 _bearer = HTTPBearer(auto_error=True)
 

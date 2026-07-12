@@ -1,0 +1,85 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "type": "timeseries", "title": "Request rate", "id": 1,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [{"expr": "sum(rate(sicurre_inference_requests_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "requests/s"}],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0}
+    },
+    {
+      "type": "timeseries", "title": "Status distribution", "id": 2,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [{"expr": "sum by (status_code) (rate(sicurre_inference_request_status_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "{{status_code}}"}],
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}
+    },
+    {
+      "type": "stat", "title": "Metrics scrape health", "id": 3,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [{"expr": "up{job=\"integrations/sicurre_ml_app\"} or up{stack=\"sicurre-ml\"}", "legendFormat": "app"}],
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}
+    },
+    {
+      "type": "timeseries", "title": "Inference latency p50 / p95 / p99", "id": 4,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[5m])))", "legendFormat": "p50"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[5m])))", "legendFormat": "p95"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[5m])))", "legendFormat": "p99"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+    },
+    {
+      "type": "timeseries", "title": "Stage latency", "id": 5,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [{"expr": "sum by (stage) (rate(sicurre_inference_stage_latency_ms_sum{stack=\"sicurre-ml\"}[5m])) / sum by (stage) (rate(sicurre_inference_stage_latency_ms_count{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "{{stage}}"}],
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+    },
+    {
+      "type": "timeseries", "title": "Verdict and label distribution", "id": 6,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [
+        {"expr": "sum by (verdict) (rate(sicurre_inference_verdict_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "verdict: {{verdict}}"},
+        {"expr": "sum by (label) (rate(sicurre_inference_label_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "label: {{label}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+    },
+    {
+      "type": "timeseries", "title": "Classifier errors", "id": 7,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [{"expr": "sum by (error_type) (rate(sicurre_inference_error_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "{{error_type}}"}],
+      "gridPos": {"h": 8, "w": 8, "x": 12, "y": 16}
+    },
+    {
+      "type": "stat", "title": "Active model version", "id": 8,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [{"expr": "sicurre_inference_model_info{stack=\"sicurre-ml\"}", "legendFormat": "{{version}}"}],
+      "gridPos": {"h": 8, "w": 4, "x": 20, "y": 16}
+    },
+    {
+      "type": "logs", "title": "ML service errors", "id": 9,
+      "datasource": {"type": "loki", "uid": "__LOGS_UID__"},
+      "targets": [{"expr": "{stack=\"sicurre-ml\", service=\"app\"} |~ `(?i)(error|exception|traceback|5[0-9]{2})`"}],
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 24}
+    },
+    {
+      "type": "traces", "title": "Recent inference traces", "id": 10,
+      "datasource": {"type": "tempo", "uid": "__TRACES_UID__"},
+      "targets": [{"queryType": "traceql", "query": "{ resource.service.name = \"sicurre-ml-inference\" }"}],
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 24}
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 40,
+  "tags": ["sicurre-ml", "production", "inference"],
+  "templating": {"list": []},
+  "time": {"from": "now-6h", "to": "now"},
+  "timezone": "browser",
+  "title": "Sicurre ML Runtime",
+  "uid": "sicurre-ml-runtime",
+  "version": 1
+}
