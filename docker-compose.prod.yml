@@ -1,3 +1,5 @@
+name: sicurre-ml
+
 # ─────────────────────────────────────────────────────────────────────────────
 # docker-compose.prod.yml — PRODUCTION (Hetzner server)
 #
@@ -26,13 +28,9 @@ services:
       - "127.0.0.1:8001:8000"
     env_file: .env
     environment:
-      REDIS_URL: "redis://redis:6379"
       # huggingface_hub writes lock/temp files to $HF_HOME.
       # The sicurre system user has no home dir, so redirect to the writable cache volume.
       HF_HOME: "/tmp/sicurre_onnx"
-    depends_on:
-      redis:
-        condition: service_healthy
     volumes:
       - onnx_cache:/tmp/sicurre_onnx
     logging:
@@ -43,28 +41,11 @@ services:
         max-size: "50m"
         max-file: "5"
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
-    # Redis is internal only — no port exposed to the host.
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   alloy:
     # Grafana Alloy: ships ML logs, metrics, and traces to Grafana Cloud.
     # Config file is in deploy/alloy/config.alloy — copy it to the server
     # before first deploy (see deploy/README.md).
-    image: grafana/alloy:latest
+    image: grafana/alloy:v1.16.1@sha256:51aeb9d829239345070619dad3edd6873186f913c84f45b365b74574fcb38ec0
     restart: unless-stopped
     env_file:
       - ./deploy/env.alloy
@@ -85,4 +66,3 @@ services:
 
 volumes:
   onnx_cache:
-  redis_data:

@@ -12,10 +12,11 @@ Endpoints:
 from __future__ import annotations
 
 import os
+from hmac import compare_digest
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Security, status
+from fastapi import Depends, FastAPI, HTTPException, Response, Security, status
 from fastapi.responses import PlainTextResponse
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
@@ -24,6 +25,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
+from opentelemetry.trace import Status, StatusCode
 
 load_dotenv()
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer  # noqa: E402
@@ -31,16 +33,24 @@ from pydantic import BaseModel, Field  # noqa: E402
 
 from src.inference.onnx_classifier import get_model_version  # noqa: E402
 from src.inference.pipeline import ClassificationResult, run_pipeline  # noqa: E402
+from src.serving.identity import deployment_manifest, response_identity_headers  # noqa: E402
+from src.serving.rate_limit import service_rate_limiter  # noqa: E402
 from src.serving.telemetry import (  # noqa: E402
     emit_classify_request_log,
+    emit_operational_log,
     observe_classify_request,
     runtime_telemetry,
 )
+
+_production = os.getenv("DEPLOYMENT_ENV", "development").lower() == "production"
 
 app = FastAPI(
     title="Sicurre Inference API",
     description="Multi-stage phishing detection — rules + blocklist + ONNX + LLM",
     version="0.1.0",
+    docs_url=None if _production else "/docs",
+    redoc_url=None if _production else "/redoc",
+    openapi_url=None if _production else "/openapi.json",
 )
 
 
@@ -88,10 +98,24 @@ def _verify_token(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="INFERENCE_API_KEY not configured on server",
         )
-    if credentials.credentials != expected:
+    if not compare_digest(credentials.credentials, expected):
+        runtime_telemetry.observe_auth_failure()
+        emit_operational_log("authentication_failure", category="invalid_bearer", status_code=401)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key",
+        )
+
+
+def _enforce_rate_limit() -> None:
+    allowed, retry_after = service_rate_limiter.check()
+    if not allowed:
+        runtime_telemetry.observe_rate_limit()
+        emit_operational_log("rate_limit_rejected", category="service_limit", status_code=429)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Inference rate limit exceeded",
+            headers={"Retry-After": str(retry_after)},
         )
 
 
@@ -158,12 +182,21 @@ def ready() -> dict[str, Any]:
     try:
         from src.inference.onnx_classifier import _load_session_and_tokenizer
         _load_session_and_tokenizer()
+        runtime_telemetry.set_model_ready(True)
         return {"status": "ready"}
-    except Exception as exc:
+    except Exception:
+        runtime_telemetry.set_model_ready(False)
+        emit_operational_log("model_readiness", category="model_not_ready", status_code=503)
+        with trace.get_tracer(__name__).start_as_current_span(
+            "model.readiness.failure"
+        ) as span:
+            span.set_status(Status(StatusCode.ERROR))
+            span.set_attribute("error.type", "model_not_ready")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Model not ready: {exc}",
-        )
+            detail="Model not ready",
+            headers={"Retry-After": "5"},
+        ) from None
 
 
 @app.post(
@@ -172,45 +205,66 @@ def ready() -> dict[str, Any]:
     tags=["inference"],
     dependencies=[Depends(_verify_token)],
 )
-def classify(request: ClassifyRequest) -> ClassifyResponse:
+def classify(
+    request: ClassifyRequest,
+    http_response: Response,
+    _: None = Depends(_enforce_rate_limit),
+) -> ClassifyResponse:
     """Run the full phishing detection pipeline on the provided text."""
     import time
-    from uuid import uuid4
 
     from src.inference.onnx_classifier import _load_session_and_tokenizer
 
-    request_id = str(uuid4())
     started_at = time.perf_counter()
     try:
         _load_session_and_tokenizer()
-    except Exception as exc:
+    except Exception:
         latency_ms = (time.perf_counter() - started_at) * 1000.0
         observe_classify_request(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             latency_ms=latency_ms,
             model_version=get_model_version(),
             error_type="model_not_ready",
+            mode="llm" if request.use_llm else "local",
         )
         emit_classify_request_log(
-            request_id=request_id,
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             latency_ms=latency_ms,
             model_version=get_model_version(),
             error_type="model_not_ready",
-            error_detail=str(exc),
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Model not ready: {exc}",
-        )
+            detail="Model not ready",
+            headers={"Retry-After": "5"},
+        ) from None
 
-    result: ClassificationResult = run_pipeline(
-        text=request.text,
-        subject=request.subject,
-        sender=request.sender,
-        use_virustotal=request.use_virustotal,
-        use_llm=request.use_llm,
-    )
+    try:
+        result: ClassificationResult = run_pipeline(
+            text=request.text,
+            subject=request.subject,
+            sender=request.sender,
+            use_virustotal=request.use_virustotal,
+            use_llm=request.use_llm,
+        )
+    except Exception:
+        latency_ms = (time.perf_counter() - started_at) * 1000.0
+        observe_classify_request(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            latency_ms=latency_ms,
+            model_version=get_model_version(),
+            error_type="pipeline_unexpected",
+            mode="llm" if request.use_llm else "local",
+        )
+        emit_operational_log(
+            "classify_failure",
+            category="pipeline_unexpected",
+            status_code=500,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Inference pipeline failed",
+        ) from None
     response = ClassifyResponse(
         verdict=result.verdict,
         label_verdict=result.label_verdict,
@@ -234,9 +288,9 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
         stage_latencies_ms=result.stage_latencies_ms,
         llm_provider=response.llm_provider,
         model_version=get_model_version(),
+        mode="llm" if request.use_llm else "local",
     )
     emit_classify_request_log(
-        request_id=request_id,
         status_code=status.HTTP_200_OK,
         latency_ms=latency_ms,
         verdict=response.verdict,
@@ -246,4 +300,15 @@ def classify(request: ClassifyRequest) -> ClassifyResponse:
         llm_provider=response.llm_provider,
         model_version=get_model_version(),
     )
+    for header, value in response_identity_headers().items():
+        http_response.headers[header] = value
     return response
+
+
+@app.get(
+    "/v1/manifest",
+    tags=["ops"],
+    dependencies=[Depends(_verify_token)],
+)
+def manifest() -> dict[str, Any]:
+    return deployment_manifest()

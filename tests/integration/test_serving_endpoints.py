@@ -78,3 +78,78 @@ def test_classify_auth_and_public_contract(monkeypatch) -> None:
     assert "stage_contributions" not in body
     assert "applied_weight" not in body["stage_breakdown"]["onnx"]
     assert "contribution" not in body["stage_breakdown"]["onnx"]
+    assert response.headers["X-Sicurre-Service-Version"] == "0.1.0"
+    assert response.headers["X-Sicurre-Model-Version"]
+    assert response.headers["X-Sicurre-Model-Revision"]
+    assert response.headers["X-Sicurre-Deployment-Revision"]
+
+
+def test_rate_limit_returns_retry_after(monkeypatch) -> None:
+    from src.serving.rate_limit import service_rate_limiter
+
+    service_rate_limiter.reset()
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-key")
+    monkeypatch.setenv("INFERENCE_RATE_LIMIT_RPS", "1")
+    monkeypatch.setenv("INFERENCE_RATE_LIMIT_BURST", "1")
+    monkeypatch.setattr(
+        "src.inference.onnx_classifier._load_session_and_tokenizer",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        serving_app,
+        "run_pipeline",
+        lambda **kwargs: ClassificationResult(
+            verdict="safe",
+            label_verdict="legitimate",
+            composite_score=0.1,
+            is_phishing=False,
+        ),
+    )
+    client = TestClient(serving_app.app)
+    payload = {"text": "hello", "use_llm": False}
+
+    assert client.post(
+        "/v1/classify", headers={"Authorization": "Bearer test-key"}, json=payload
+    ).status_code == 200
+    limited = client.post(
+        "/v1/classify", headers={"Authorization": "Bearer test-key"}, json=payload
+    )
+
+    assert limited.status_code == 429
+    assert int(limited.headers["Retry-After"]) >= 1
+
+
+def test_unexpected_pipeline_error_is_sanitized(monkeypatch) -> None:
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "src.inference.onnx_classifier._load_session_and_tokenizer",
+        lambda: None,
+    )
+
+    def fail_pipeline(**kwargs: object) -> ClassificationResult:
+        raise RuntimeError("raw message content must not escape")
+
+    monkeypatch.setattr(serving_app, "run_pipeline", fail_pipeline)
+    client = TestClient(serving_app.app)
+    response = client.post(
+        "/v1/classify",
+        headers={"Authorization": "Bearer test-key"},
+        json={"text": "private email body", "use_llm": False},
+    )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Inference pipeline failed"}
+    assert "private email body" not in response.text
+
+
+def test_manifest_requires_auth(monkeypatch) -> None:
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-key")
+    client = TestClient(serving_app.app)
+
+    assert client.get("/v1/manifest").status_code == 401
+    response = client.get(
+        "/v1/manifest", headers={"Authorization": "Bearer test-key"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["service"]["api_contract"] == "v1"

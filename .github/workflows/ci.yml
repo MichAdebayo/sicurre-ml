@@ -52,10 +52,10 @@ jobs:
         run: uv sync --group dev --group inference --frozen
 
       - name: Ruff — style and import checks
-        run: uv run ruff check src .github/scripts tests
+        run: uv run ruff check src .github/scripts deploy/scripts tests
 
       - name: Mypy — static type checks
-        run: uv run mypy src .github/scripts tests
+        run: uv run mypy src .github/scripts deploy/scripts tests
 
   # ── 3. Tests + coverage ──────────────────────────────────────────────────
   test:
@@ -107,7 +107,31 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: sicurre-ml:ci-check
           # Use GitHub Actions cache to speed up repeated builds
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan container image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: sicurre-ml:ci-check
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+  dependency-audit:
+    name: Dependency vulnerability audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Export locked dependencies
+        run: uv export --all-groups --format requirements-txt --no-hashes --output-file /tmp/requirements.txt
+      - name: Audit locked Python dependencies
+        run: uvx --from pip-audit pip-audit --requirement /tmp/requirements.txt

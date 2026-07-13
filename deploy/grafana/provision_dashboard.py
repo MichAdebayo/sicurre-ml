@@ -31,7 +31,7 @@ def _request(
     method: str = "GET",
     payload: dict[str, Any] | None = None,
     accepted: tuple[int, ...] = (200,),
-) -> tuple[int, dict[str, Any]]:
+) -> tuple[int, Any]:
     data = json.dumps(payload).encode() if payload is not None else None
     request = Request(
         f"{base_url.rstrip('/')}{endpoint}",
@@ -66,10 +66,114 @@ def _replace_strings(value: Any, old: str, new: str) -> Any:
     return value
 
 
+def _alert_rule(definition: dict[str, Any], datasource_uid: str) -> dict[str, Any]:
+    evaluator_type = str(definition["operator"])
+    return {
+        "uid": definition["uid"],
+        "folderUID": FOLDER_UID,
+        "ruleGroup": "Sicurre ML production",
+        "title": definition["title"],
+        "condition": "C",
+        "data": [
+            {
+                "refId": "A",
+                "queryType": "",
+                "relativeTimeRange": {"from": 900, "to": 0},
+                "datasourceUid": datasource_uid,
+                "model": {
+                    "editorMode": "code",
+                    "expr": definition["expr"],
+                    "instant": True,
+                    "intervalMs": 60000,
+                    "legendFormat": "__auto",
+                    "maxDataPoints": 43200,
+                    "refId": "A",
+                },
+            },
+            {
+                "refId": "B",
+                "queryType": "",
+                "relativeTimeRange": {"from": 0, "to": 0},
+                "datasourceUid": "-100",
+                "model": {
+                    "conditions": [],
+                    "datasource": {"type": "__expr__", "uid": "-100"},
+                    "expression": "A",
+                    "reducer": "last",
+                    "refId": "B",
+                    "type": "reduce",
+                },
+            },
+            {
+                "refId": "C",
+                "queryType": "",
+                "relativeTimeRange": {"from": 0, "to": 0},
+                "datasourceUid": "-100",
+                "model": {
+                    "conditions": [
+                        {
+                            "evaluator": {
+                                "params": [definition["threshold"]],
+                                "type": evaluator_type,
+                            },
+                            "operator": {"type": "and"},
+                            "query": {"params": ["C"]},
+                            "reducer": {"params": [], "type": "last"},
+                            "type": "query",
+                        }
+                    ],
+                    "datasource": {"type": "__expr__", "uid": "-100"},
+                    "expression": "B",
+                    "refId": "C",
+                    "type": "threshold",
+                },
+            },
+        ],
+        "noDataState": definition.get("no_data", "OK"),
+        "execErrState": "Error",
+        "for": definition["for"],
+        "annotations": {"summary": definition["title"]},
+        "labels": {"service": "sicurre-ml", "severity": definition["severity"]},
+        "isPaused": False,
+    }
+
+
+def _provision_alerts(
+    base_url: str,
+    token: str,
+    datasource_uid: str,
+    alert_path: Path,
+) -> None:
+    definitions = json.loads(alert_path.read_text(encoding="utf-8"))
+    _, existing = _request(
+        base_url,
+        token,
+        "/api/v1/provisioning/alert-rules",
+    )
+    existing_uids = {rule.get("uid") for rule in existing}
+    for definition in definitions:
+        rule = _alert_rule(definition, datasource_uid)
+        if definition["uid"] in existing_uids:
+            endpoint = f"/api/v1/provisioning/alert-rules/{definition['uid']}"
+            method = "PUT"
+        else:
+            endpoint = "/api/v1/provisioning/alert-rules"
+            method = "POST"
+        _request(
+            base_url,
+            token,
+            endpoint,
+            method=method,
+            payload=rule,
+            accepted=(200, 201, 202),
+        )
+
+
 def main() -> None:
     dashboard_path = Path(
         sys.argv[1] if len(sys.argv) > 1 else "/workspace/dashboards/sicurre-ml-runtime.json"
     )
+    alert_path = dashboard_path.parent.parent / "alerts" / "sicurre-ml-alerts.json"
     grafana_url = _required_env("GRAFANA_URL")
     token = _required_env("GRAFANA_SERVICE_ACCOUNT_TOKEN")
 
@@ -120,6 +224,7 @@ def main() -> None:
     )
     if verified.get("dashboard", {}).get("uid") != dashboard["uid"]:
         raise RuntimeError("Grafana dashboard verification failed")
+    _provision_alerts(grafana_url, token, datasource_uid, alert_path)
     print(f"Provisioned {dashboard['title']}: {grafana_url.rstrip('/')}{provisioned['url']}")
 
 
