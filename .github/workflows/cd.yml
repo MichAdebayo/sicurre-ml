@@ -239,6 +239,6 @@ jobs:
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
             set -a
-            . ./.env
+            . ./deploy/env.alloy
             set +a
             bash deploy/grafana/provision_dashboard.sh

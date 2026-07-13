@@ -15,8 +15,6 @@ datasource_uid() {
 }
 
 prom_uid=$(datasource_uid "grafanacloud-sicurre-prom")
-logs_uid=$(datasource_uid "grafanacloud-sicurre-logs")
-traces_uid=$(datasource_uid "grafanacloud-sicurre-traces")
 
 folder_uid=$(
   curl --fail --silent --show-error \
@@ -34,13 +32,9 @@ fi
 
 jq \
   --arg prom "$prom_uid" \
-  --arg logs "$logs_uid" \
-  --arg traces "$traces_uid" \
   --arg folder "$folder_uid" \
   '{dashboard: (. | walk(if type == "string" then
-      gsub("__PROM_UID__"; $prom) |
-      gsub("__LOGS_UID__"; $logs) |
-      gsub("__TRACES_UID__"; $traces)
+      gsub("__PROM_UID__"; $prom)
     else . end)), folderUid: $folder, overwrite: true, message: "Provisioned by sicurre-ml CD"}' \
   "$dashboard_path" | \
   curl --fail --silent --show-error -X POST \
