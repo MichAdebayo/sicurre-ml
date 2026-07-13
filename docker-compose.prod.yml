@@ -61,18 +61,20 @@ services:
         max-file: "3"
 
   alloy:
-    # Grafana Alloy: ships container logs from this compose stack to Loki.
+    # Grafana Alloy: ships ML logs, metrics, and traces to Grafana Cloud.
     # Config file is in deploy/alloy/config.alloy — copy it to the server
     # before first deploy (see deploy/README.md).
     image: grafana/alloy:latest
     restart: unless-stopped
+    env_file:
+      - ./deploy/env.alloy
     volumes:
       - ./deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro
       # Docker socket: needed for Alloy to discover container log paths.
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # /var/lib/docker/containers: needed to read container log files.
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-    command: run /etc/alloy/config.alloy
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
     depends_on:
       - app
     logging:

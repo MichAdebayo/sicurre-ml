@@ -145,3 +145,11 @@ def classify_onnx(text: str, max_length: int = 256) -> OnnxResult:
         confidence=float(probs[best_idx]),
         raw_scores=raw_scores,
     )
+
+
+def get_model_version() -> str:
+    cache_dir = _model_cache_dir()
+    sha_file = cache_dir / "sha.txt"
+    if sha_file.exists():
+        return sha_file.read_text().strip() or "unknown"
+    return os.getenv("MODEL_SHA", os.getenv("ONNX_MODEL_SHA", "unknown"))

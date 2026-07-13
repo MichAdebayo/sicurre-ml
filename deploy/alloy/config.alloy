@@ -1,73 +1,101 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Grafana Alloy configuration — sicurre-ml
-//
-// Ships structured JSON logs from the sicurre-ml Docker Compose stack
-// to Grafana Cloud Loki.
-//
-// Fill in GRAFANA_CLOUD_LOKI_URL, GRAFANA_CLOUD_USER, and
-// GRAFANA_CLOUD_API_KEY before deploying (see deploy/README.md).
-//
-// Reference: https://grafana.com/docs/alloy/latest/
-// ─────────────────────────────────────────────────────────────────────────────
+// Sicurre ML telemetry pipeline. Secrets are supplied by deploy/env.alloy.
 
-// ── 1. Discover Docker container log files ────────────────────────────────
-discovery.docker "sicurre_containers" {
+discovery.docker "sicurre_ml_containers" {
   host = "unix:///var/run/docker.sock"
-
-  // Scope to containers in the sicurre-ml compose project only.
   filter {
     name   = "label"
     values = ["com.docker.compose.project=sicurre-ml"]
   }
 }
 
-// ── 2. Relabel: extract container name and compose service ────────────────
-discovery.relabel "sicurre_meta" {
-  targets = discovery.docker.sicurre_containers.targets
-
-  // Add a `container` label from the Docker container name.
+discovery.relabel "sicurre_ml_meta" {
+  targets = discovery.docker.sicurre_ml_containers.targets
   rule {
     source_labels = ["__meta_docker_container_name"]
     regex         = "/(.*)"
     target_label  = "container"
   }
-
-  // Add a `service` label from the Docker Compose service name.
   rule {
     source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
     target_label  = "service"
   }
-
-  // Fixed job label to identify this stack in Loki queries.
   rule {
-    target_label = "job"
+    target_label = "stack"
     replacement  = "sicurre-ml"
+  }
+  rule {
+    target_label = "env"
+    replacement  = "production"
+  }
+  rule {
+    target_label = "server"
+    replacement  = "hetzner-cx33"
   }
 }
 
-// ── 3. Scrape the log files ───────────────────────────────────────────────
-loki.source.docker "sicurre_logs" {
+loki.source.docker "sicurre_ml_logs" {
   host       = "unix:///var/run/docker.sock"
-  targets    = discovery.relabel.sicurre_meta.output
+  targets    = discovery.relabel.sicurre_ml_meta.output
+  forward_to = [loki.process.sicurre_ml_logs.receiver]
+}
+
+loki.process "sicurre_ml_logs" {
+  stage.drop {
+    expression = `(?i)"(GET|HEAD) /(v1/)?(health|ready|metrics)(\?[^ ]*)? HTTP/[^\"]+"`
+  }
   forward_to = [loki.write.grafana_cloud.receiver]
 }
 
-// ── 4. Ship to Grafana Cloud Loki ────────────────────────────────────────
 loki.write "grafana_cloud" {
   endpoint {
-    // Replace these with your Grafana Cloud Loki push URL and credentials.
-    // Find them at: https://grafana.com/profile/org → Loki → Details
-    url = "https://<GRAFANA_CLOUD_LOKI_URL>/loki/api/v1/push"
-
+    url = sys.env("GRAFANA_LOKI_URL")
     basic_auth {
-      username = "<GRAFANA_CLOUD_USER>"
-      password = "<GRAFANA_CLOUD_API_KEY>"
+      username = sys.env("GRAFANA_LOKI_USER")
+      password = sys.env("GRAFANA_LOKI_WRITE_API_TOKEN")
     }
   }
+}
 
-  // Add a fixed label so all logs from this server are identifiable.
+prometheus.scrape "sicurre_ml_app" {
+  targets         = [{ "__address__" = "app:8000" }]
+  scrape_interval = "60s"
+  metrics_path    = "/v1/metrics"
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = sys.env("GRAFANA_PROMETHEUS_REMOTE_WRITE_URL")
+    basic_auth {
+      username = sys.env("GRAFANA_PROMETHEUS_METRICS_USERNAME")
+      password = sys.env("GRAFANA_PROMETHEUS_METRICS_API_TOKEN")
+    }
+  }
   external_labels = {
+    stack  = "sicurre-ml",
     env    = "production",
     server = "hetzner-cx33",
+  }
+}
+
+otelcol.auth.basic "grafana_cloud" {
+  username = sys.env("GRAFANA_OPEN_TELEMETRY_INSTANCE_ID")
+  password = sys.env("GRAFANA_OPEN_TELEMETRY_API_TOKEN")
+}
+
+otelcol.receiver.otlp "sicurre_ml" {
+  grpc { endpoint = "0.0.0.0:4317" }
+  http { endpoint = "0.0.0.0:4318" }
+  output { traces = [otelcol.processor.batch.sicurre_ml.input] }
+}
+
+otelcol.processor.batch "sicurre_ml" {
+  output { traces = [otelcol.exporter.otlphttp.grafana_cloud.input] }
+}
+
+otelcol.exporter.otlphttp "grafana_cloud" {
+  client {
+    endpoint = sys.env("GRAFANA_OPEN_TELEMETRY_OTLP_ENDPOINT")
+    auth     = otelcol.auth.basic.grafana_cloud.handler
   }
 }
