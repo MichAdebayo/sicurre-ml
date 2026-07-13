@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
 
-
 _PROMETHEUS_BUCKETS_MS = (25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0)
 
 
@@ -32,10 +31,10 @@ class RuntimeTelemetry:
     total_latency_ms_sum: float = 0.0
     total_latency_ms_count: int = 0
     total_latency_ms_max: float = 0.0
-    stage_latency_ms_sum: Counter[str] = field(default_factory=Counter)
+    stage_latency_ms_sum: dict[str, float] = field(default_factory=dict)
     stage_latency_ms_count: Counter[str] = field(default_factory=Counter)
     stage_latency_ms_max: dict[str, float] = field(default_factory=dict)
-    label_distribution_total: Counter[str] = field(default_factory=Counter)
+    label_distribution_total: dict[str, float] = field(default_factory=dict)
     total_latency_buckets: Counter[float] = field(default_factory=Counter)
 
     def observe(
@@ -75,11 +74,15 @@ class RuntimeTelemetry:
 
             if label_distribution:
                 for label, value in _sanitize_distribution(label_distribution).items():
-                    self.label_distribution_total[label] += value
+                    self.label_distribution_total[label] = (
+                        self.label_distribution_total.get(label, 0.0) + value
+                    )
 
             if stage_latencies_ms:
                 for stage, stage_latency in stage_latencies_ms.items():
-                    self.stage_latency_ms_sum[stage] += stage_latency
+                    self.stage_latency_ms_sum[stage] = (
+                        self.stage_latency_ms_sum.get(stage, 0.0) + stage_latency
+                    )
                     self.stage_latency_ms_count[stage] += 1
                     self.stage_latency_ms_max[stage] = max(
                         self.stage_latency_ms_max.get(stage, 0.0),
@@ -131,7 +134,9 @@ class RuntimeTelemetry:
                 for error_type, count in sorted(self.error_total.items())
             ]
 
-            model_version = model_version or _env_text("MODEL_SHA", _env_text("ONNX_MODEL_SHA", "unknown"))
+            model_version = model_version or _env_text(
+                "MODEL_SHA", _env_text("ONNX_MODEL_SHA", "unknown")
+            )
 
             lines = [
                 '# HELP sicurre_inference_requests_total Total classify requests processed.',
@@ -150,10 +155,10 @@ class RuntimeTelemetry:
                 '# HELP sicurre_inference_verdict_total Verdict counts returned by the service.',
                 '# TYPE sicurre_inference_verdict_total counter',
                 *verdict_lines,
-                '# HELP sicurre_inference_label_total Label verdict counts returned by the service.',
+                '# HELP sicurre_inference_label_total Label verdict counts.',
                 '# TYPE sicurre_inference_label_total counter',
                 *label_lines,
-                '# HELP sicurre_inference_label_distribution_total Sum of label distribution probabilities across requests.',
+                '# HELP sicurre_inference_label_distribution_total Summed label probabilities.',
                 '# TYPE sicurre_inference_label_distribution_total counter',
                 *label_distribution_lines,
                 '# HELP sicurre_inference_stage_latency_ms_sum Stage latency in milliseconds.',
@@ -198,7 +203,8 @@ def emit_classify_request_log(
         "request_id": request_id,
         "status_code": status_code,
         "latency_ms": round(latency_ms, 3),
-        "model_version": model_version or _env_text("MODEL_SHA", _env_text("ONNX_MODEL_SHA", "unknown")),
+        "model_version": model_version
+        or _env_text("MODEL_SHA", _env_text("ONNX_MODEL_SHA", "unknown")),
     }
     if verdict is not None:
         payload["verdict"] = verdict
