@@ -2,10 +2,11 @@
 set -euo pipefail
 
 : "${GRAFANA_URL:?GRAFANA_URL is required}"
-: "${GRAFANA_API_TOKEN:?GRAFANA_API_TOKEN is required}"
+dashboard_token="${GRAFANA_SERVICE_ACCOUNT_TOKEN:-${GRAFANA_API_TOKEN:-}}"
+: "${dashboard_token:?GRAFANA_SERVICE_ACCOUNT_TOKEN is required}"
 
 dashboard_path="${1:-deploy/grafana/dashboards/sicurre-ml-runtime.json}"
-auth_header="Authorization: Bearer ${GRAFANA_API_TOKEN}"
+auth_header="Authorization: Bearer ${dashboard_token}"
 
 datasource_uid() {
   curl --fail --silent --show-error \
@@ -45,4 +46,3 @@ jq \
   curl --fail --silent --show-error -X POST \
     -H "$auth_header" -H "Content-Type: application/json" \
     --data-binary @- "${GRAFANA_URL%/}/api/dashboards/db"
-

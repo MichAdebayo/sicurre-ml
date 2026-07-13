@@ -1,7 +1,7 @@
 name: CI
 
 # Runs on every push to every branch and on every pull request.
-# All jobs must pass before the docker-build job runs.
+# Checks run independently in parallel. CD remains gated on the completed CI workflow.
 # Merges to main are blocked by GitHub branch protection if any job fails.
 on:
   push:
@@ -13,7 +13,6 @@ env:
 
 jobs:
   # ── 1. Secret scanning ───────────────────────────────────────────────────
-  # Runs first — no code quality or test work starts until secrets are clean.
   secret-scan:
     name: Secret scanning
     runs-on: ubuntu-latest
@@ -41,7 +40,6 @@ jobs:
   lint:
     name: Lint & type check
     runs-on: ubuntu-latest
-    needs: secret-scan
     steps:
       - uses: actions/checkout@v4
 
@@ -63,7 +61,6 @@ jobs:
   test:
     name: Tests (≥90% coverage)
     runs-on: ubuntu-latest
-    needs: lint
     steps:
       - uses: actions/checkout@v4
 
@@ -96,11 +93,10 @@ jobs:
           retention-days: 7
 
   # ── 4. Docker build check ────────────────────────────────────────────────
-  # Runs only after all quality gates pass. Does NOT push the image.
+  # Runs independently and does not push the image.
   docker-build:
     name: Docker build (verify only)
     runs-on: ubuntu-latest
-    needs: test
     steps:
       - uses: actions/checkout@v4
 

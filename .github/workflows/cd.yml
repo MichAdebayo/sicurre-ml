@@ -229,11 +229,16 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Provision Sicurre ML dashboard
-        env:
-          GRAFANA_URL: ${{ secrets.GRAFANA_URL }}
-          GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
-        run: bash deploy/grafana/provision_dashboard.sh
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            set -a
+            . ./.env
+            set +a
+            bash deploy/grafana/provision_dashboard.sh
