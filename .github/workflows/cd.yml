@@ -238,7 +238,14 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
-            set -a
-            . ./deploy/env.alloy
-            set +a
-            bash deploy/grafana/provision_dashboard.sh
+            app_image=$(docker compose -f docker-compose.prod.yml images -q app)
+            if [ -z "$app_image" ]; then
+              echo "Unable to resolve the deployed sicurre-ml app image." >&2
+              exit 1
+            fi
+            docker run --rm \
+              --env-file deploy/env.alloy \
+              --volume "$PWD/deploy/grafana:/workspace:ro" \
+              "$app_image" \
+              python /workspace/provision_dashboard.py \
+              /workspace/dashboards/sicurre-ml-runtime.json
