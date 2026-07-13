@@ -153,3 +153,11 @@ def test_manifest_requires_auth(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["service"]["api_contract"] == "v1"
+
+
+def test_untrusted_host_is_rejected() -> None:
+    client = TestClient(serving_app.app)
+
+    response = client.get("/v1/health", headers={"Host": "attacker.invalid"})
+
+    assert response.status_code == 400

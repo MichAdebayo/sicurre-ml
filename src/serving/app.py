@@ -26,6 +26,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
 from opentelemetry.trace import Status, StatusCode
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 load_dotenv()
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer  # noqa: E402
@@ -51,6 +52,17 @@ app = FastAPI(
     docs_url=None if _production else "/docs",
     redoc_url=None if _production else "/redoc",
     openapi_url=None if _production else "/openapi.json",
+)
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        host.strip()
+        for host in os.getenv(
+            "INFERENCE_ALLOWED_HOSTS",
+            "api.sicurre.com,app,localhost,127.0.0.1,testserver",
+        ).split(",")
+        if host.strip()
+    ],
 )
 
 

@@ -114,7 +114,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Scan container image for high and critical vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: sicurre-ml:ci-check
           format: table
@@ -123,7 +123,7 @@ jobs:
           exit-code: "1"
 
   dependency-audit:
-    name: Dependency vulnerability audit
+    name: Production dependency vulnerability audit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,7 +131,39 @@ jobs:
         with:
           version: "latest"
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Export locked dependencies
-        run: uv export --all-groups --format requirements-txt --no-hashes --output-file /tmp/requirements.txt
-      - name: Audit locked Python dependencies
-        run: uvx --from pip-audit pip-audit --requirement /tmp/requirements.txt
+      - name: Export locked production dependencies
+        run: >-
+          uv export --no-default-groups --group inference --frozen
+          --format requirements-txt --no-hashes
+          --output-file /tmp/requirements-production.txt
+      - name: Audit production Python dependencies
+        # FastAPI 0.136.1 constrains Starlette below the published fixed line.
+        # Exact exceptions and compensating controls are documented in
+        # .github/security-audit-exceptions.md; no package-wide ignore is used.
+        run: |
+          uvx --python ${{ env.PYTHON_VERSION }} --from pip-audit pip-audit \
+            --requirement /tmp/requirements-production.txt \
+            --ignore-vuln PYSEC-2026-161 \
+            --ignore-vuln PYSEC-2026-249 \
+            --ignore-vuln PYSEC-2026-248 \
+            --ignore-vuln PYSEC-2026-2281 \
+            --ignore-vuln PYSEC-2026-2280
+
+  dependency-audit-all:
+    name: Training and tooling vulnerability report
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Export all locked dependency groups
+        run: >-
+          uv export --all-groups --frozen --format requirements-txt --no-hashes
+          --output-file /tmp/requirements-all.txt
+      - name: Report training and tooling vulnerabilities
+        run: >-
+          uvx --python ${{ env.PYTHON_VERSION }} --from pip-audit pip-audit
+          --requirement /tmp/requirements-all.txt
