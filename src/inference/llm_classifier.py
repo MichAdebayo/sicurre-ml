@@ -33,6 +33,14 @@ _SYSTEM = textwrap.dedent(
     en français. Analyse le message fourni et détermine s'il s'agit d'une
     tentative de phishing (hameçonnage) ou d'un message légitime.
 
+    Tu dois impérativement évaluer:
+    - l'adresse expéditeur (signes de spoofing, domaine suspect, typosquatting),
+    - l'objet (urgence anormale, menaces, demande de paiement, réinitialisation),
+    - le corps du message (liens, pression psychologique, incohérences).
+
+    Si une vérification web externe n'est pas disponible, indique explicitement
+    que la réputation externe n'a pas pu être vérifiée dans l'explication.
+
     Réponds UNIQUEMENT en JSON avec ce format exact :
     {
       "label": "phishing" | "safe",
@@ -43,15 +51,26 @@ _SYSTEM = textwrap.dedent(
 )
 
 
-def _user_prompt(text: str) -> str:
-    return f"Message à analyser :\n\n{text}"
+def _user_prompt(text: str, sender: str | None = None, subject: str | None = None) -> str:
+    sender_value = sender.strip() if sender else "(non fourni)"
+    subject_value = subject.strip() if subject else "(non fourni)"
+    return (
+        "Email à analyser :\n"
+        f"Expéditeur: {sender_value}\n"
+        f"Objet: {subject_value}\n"
+        f"Corps:\n{text}"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Per-provider callers
 # ---------------------------------------------------------------------------
 
-def _call_groq(text: str) -> LLMResult | None:
+def _call_groq(
+    text: str,
+    sender: str | None = None,
+    subject: str | None = None,
+) -> LLMResult | None:
     api_key = os.getenv("GROQ_API_KEY")
     model = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
     temperature = float(os.getenv("GROQ_MODEL_TEMPERATURE", "0.3"))
@@ -63,11 +82,17 @@ def _call_groq(text: str) -> LLMResult | None:
         model=model,
         temperature=temperature,
         text=text,
+        sender=sender,
+        subject=subject,
         provider="groq",
     )
 
 
-def _call_cerebras(text: str) -> LLMResult | None:
+def _call_cerebras(
+    text: str,
+    sender: str | None = None,
+    subject: str | None = None,
+) -> LLMResult | None:
     api_key = os.getenv("CEREBRAS_API_KEY")
     model = os.getenv("CEREBRAS_MODEL", "llama3.1-8b")
     temperature = float(os.getenv("CEREBRAS_MODEL_TEMPERATURE", "0.3"))
@@ -79,11 +104,17 @@ def _call_cerebras(text: str) -> LLMResult | None:
         model=model,
         temperature=temperature,
         text=text,
+        sender=sender,
+        subject=subject,
         provider="cerebras",
     )
 
 
-def _call_gemini(text: str) -> LLMResult | None:
+def _call_gemini(
+    text: str,
+    sender: str | None = None,
+    subject: str | None = None,
+) -> LLMResult | None:
     api_key = os.getenv("GEMINI_API_KEY")
     model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
     if not api_key:
@@ -93,7 +124,18 @@ def _call_gemini(text: str) -> LLMResult | None:
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             params={"key": api_key},
             json={
-                "contents": [{"parts": [{"text": f"{_SYSTEM}\n\n{_user_prompt(text)}"}]}],
+                "contents": [
+                    {
+                        "parts": [
+                            {
+                                "text": (
+                                    f"{_SYSTEM}\n\n"
+                                    f"{_user_prompt(text, sender=sender, subject=subject)}"
+                                )
+                            }
+                        ]
+                    }
+                ],
                 "generationConfig": {"temperature": 0.3},
             },
             timeout=20,
@@ -113,6 +155,8 @@ def _openai_compatible(
     model: str,
     temperature: float,
     text: str,
+    sender: str | None = None,
+    subject: str | None = None,
     provider: str,
 ) -> LLMResult | None:
     try:
@@ -127,7 +171,10 @@ def _openai_compatible(
                 "temperature": temperature,
                 "messages": [
                     {"role": "system", "content": _SYSTEM},
-                    {"role": "user", "content": _user_prompt(text)},
+                    {
+                        "role": "user",
+                        "content": _user_prompt(text, sender=sender, subject=subject),
+                    },
                 ],
                 "response_format": {"type": "json_object"},
             },
@@ -172,13 +219,18 @@ def _parse_response(raw: str, provider: str) -> LLMResult | None:
 _TIERS = [_call_groq, _call_cerebras, _call_gemini]
 
 
-def classify_llm(text: str) -> LLMResult | None:
+def classify_llm(
+    text: str,
+    *,
+    sender: str | None = None,
+    subject: str | None = None,
+) -> LLMResult | None:
     """Try each LLM tier in order; return the first successful result.
 
     Returns None only if all four providers fail (network outage etc.).
     """
     for tier_fn in _TIERS:
-        result = tier_fn(text)
+        result = tier_fn(text, sender=sender, subject=subject)
         if result is not None:
             print(
                 f"[llm] Response from {result.provider}: "

@@ -25,6 +25,7 @@ sample_*.md
 *temp/
 *tmp/
 deploy/.env
+deploy/env.alloy
 deploy/README.md
 # Cloudflare Origin CA certs — never commit private keys
 deploy/nginx/ssl/
@@ -33,3 +34,13 @@ vinse_relay.md
 deploy/nginx/README.md
 tmp/
 temp/
+
+# Keep certification evidence and API contract docs versioned.
+!docs/
+docs/*
+docs/report/
+docs/report/**
+!docs/api/
+!docs/api/openapi.yaml
+docs/ops/
+docs/ops/**
