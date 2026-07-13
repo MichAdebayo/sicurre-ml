@@ -229,11 +229,23 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Provision Sicurre ML dashboard
-        env:
-          GRAFANA_URL: ${{ secrets.GRAFANA_URL }}
-          GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
-        run: bash deploy/grafana/provision_dashboard.sh
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            app_image=$(docker compose -f docker-compose.prod.yml images -q app)
+            if [ -z "$app_image" ]; then
+              echo "Unable to resolve the deployed sicurre-ml app image." >&2
+              exit 1
+            fi
+            docker run --rm \
+              --env-file deploy/env.alloy \
+              --volume "$PWD/deploy/grafana:/workspace:ro" \
+              "$app_image" \
+              python /workspace/provision_dashboard.py \
+              /workspace/dashboards/sicurre-ml-runtime.json
