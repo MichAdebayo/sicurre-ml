@@ -234,11 +234,7 @@ jobs:
               # production secrets into a second container.
               docker cp deploy/scripts/validate_deployment.py \
                 "$app_container:/tmp/validate_deployment.py"
-              docker exec \
-                --env INFERENCE_INTERNAL_URL=http://127.0.0.1:8000 \
-                --env DEPLOYMENT_MANIFEST_OUTPUT=/tmp/current-deployment.json \
-                "$app_container" \
-                python /tmp/validate_deployment.py
+              docker exec --env INFERENCE_INTERNAL_URL=http://127.0.0.1:8000 --env DEPLOYMENT_MANIFEST_OUTPUT=/tmp/current-deployment.json "$app_container" /app/.venv/bin/python /tmp/validate_deployment.py
               docker cp "$app_container:/tmp/current-deployment.json" \
                 deploy/current-deployment.json.tmp
               mv deploy/current-deployment.json.tmp deploy/current-deployment.json
@@ -293,11 +289,7 @@ jobs:
             fi
             docker cp deploy/scripts/validate_observability.py \
               "$app_container:/tmp/validate_observability.py"
-            docker exec \
-              --env OBSERVABILITY_APP_URL=http://127.0.0.1:8000 \
-              --env OBSERVABILITY_ALLOY_URL=http://alloy:12345 \
-              "$app_container" \
-              python /tmp/validate_observability.py
+            docker exec --env OBSERVABILITY_APP_URL=http://127.0.0.1:8000 --env OBSERVABILITY_ALLOY_URL=http://alloy:12345 "$app_container" /app/.venv/bin/python /tmp/validate_observability.py
 
   provision-dashboard:
     name: Provision Grafana dashboard
@@ -320,9 +312,4 @@ jobs:
               echo "Unable to resolve the deployed sicurre-ml app image." >&2
               exit 1
             fi
-            docker run --rm \
-              --env-file deploy/env.alloy \
-              --volume "$PWD/deploy/grafana:/workspace:ro" \
-              "$app_image" \
-              python /workspace/provision_dashboard.py \
-              /workspace/dashboards/sicurre-ml-runtime.json
+            docker run --rm --env-file deploy/env.alloy --volume "$PWD/deploy/grafana:/workspace:ro" "$app_image" /app/.venv/bin/python /workspace/provision_dashboard.py /workspace/dashboards/sicurre-ml-runtime.json
