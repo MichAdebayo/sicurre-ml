@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
 import re
 import time
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+APP_URL = os.getenv("OBSERVABILITY_APP_URL", "http://127.0.0.1:8000").rstrip("/")
+ALLOY_URL = os.getenv("OBSERVABILITY_ALLOY_URL", "http://alloy:12345").rstrip("/")
 
 
 def _read(url: str) -> str:
@@ -12,6 +16,17 @@ def _read(url: str) -> str:
         if response.status != 200:
             raise RuntimeError(f"{url} returned HTTP {response.status}")
         return response.read().decode()
+
+
+def _read_with_retry(url: str, *, attempts: int = 12, delay_seconds: int = 5) -> str:
+    last_error: Exception | None = None
+    for _ in range(attempts):
+        try:
+            return _read(url)
+        except (OSError, RuntimeError, URLError) as exc:
+            last_error = exc
+            time.sleep(delay_seconds)
+    raise RuntimeError(f"Telemetry endpoint unavailable after {attempts} attempts") from last_error
 
 
 def _metric_sum(metrics: str, metric_name: str) -> float:
@@ -29,21 +44,21 @@ def _require_delivery(metrics: str, candidates: tuple[str, ...], pipeline: str) 
 
 
 def main() -> None:
-    _read("http://alloy:12345/-/ready")
-    app_metrics = _read("http://app:8000/v1/metrics")
+    _read_with_retry(f"{ALLOY_URL}/-/ready")
+    app_metrics = _read_with_retry(f"{APP_URL}/v1/metrics")
     if "sicurre_service_up 1" not in app_metrics:
         raise RuntimeError("Application telemetry endpoint is unhealthy")
 
     # Generate an authentication failure so the error tail-sampling policy and
     # security log path have deterministic post-deployment traffic.
     try:
-        urlopen(Request("http://app:8000/v1/classify", method="POST"), timeout=15)  # noqa: S310
+        urlopen(Request(f"{APP_URL}/v1/classify", method="POST"), timeout=15)  # noqa: S310
     except HTTPError:
         pass
 
     # Allow at least one 60-second application and Alloy self-scrape cycle.
     time.sleep(65)
-    alloy_metrics = _read("http://alloy:12345/metrics")
+    alloy_metrics = _read_with_retry(f"{ALLOY_URL}/metrics")
     required_families = (
         "prometheus_remote_storage_",
         "loki_write_",
