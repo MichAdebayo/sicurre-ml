@@ -26,7 +26,7 @@ def _read_with_retry(url: str, *, attempts: int = 12, delay_seconds: int = 5) ->
         except (OSError, RuntimeError, URLError) as exc:
             last_error = exc
             time.sleep(delay_seconds)
-    raise RuntimeError(f"Telemetry endpoint unavailable after {attempts} attempts") from last_error
+    raise RuntimeError(f"{url} unavailable after {attempts} attempts") from last_error
 
 
 def _metric_sum(metrics: str, metric_name: str) -> float:
