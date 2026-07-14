@@ -153,7 +153,9 @@ otelcol.processor.tail_sampling "sicurre_ml" {
 		type = "probabilistic"
 
 		probabilistic {
-			sampling_percentage = convert.to_number(sys.env("OTEL_TRACE_SAMPLE_PERCENT"))
+			// Alloy's convert namespace only handles sensitivity. Decode the
+			// non-secret JSON number instead of calling a nonexistent converter.
+			sampling_percentage = encoding.from_json(sys.env("OTEL_TRACE_SAMPLE_PERCENT"))
 			hash_salt           = "sicurre-ml-production"
 		}
 	}

@@ -38,6 +38,17 @@ def test_cd_force_recreates_alloy_after_config_sync() -> None:
     workflow = Path(".github/workflows/cd.yml").read_text(encoding="utf-8")
 
     assert "docker compose -f docker-compose.prod.yml up -d --force-recreate alloy" in workflow
+    assert "ML-owned Alloy failed to remain running" in workflow
+    assert "docker compose -f docker-compose.prod.yml logs --tail=150 alloy" in workflow
+
+
+def test_ci_starts_pinned_alloy_runtime_graph() -> None:
+    workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    assert "alloy-runtime:" in workflow
+    assert "alloy-runtime-check" in workflow
+    assert "http://127.0.0.1:12345/-/ready" in workflow
+    assert "grafana/alloy:v1.16.1@sha256:" in workflow
 
 
 def test_dashboard_provisioning_uses_container_python() -> None:
@@ -61,6 +72,8 @@ def test_alloy_uses_shared_drilldown_service_identity() -> None:
 
     assert config.count('service_name = "sicurre-ml-inference"') == 2
     assert config.count('stack        = "sicurre-ml"') == 2
+    assert 'encoding.from_json(sys.env("OTEL_TRACE_SAMPLE_PERCENT"))' in config
+    assert "convert.to_number" not in config
 
 
 def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:
