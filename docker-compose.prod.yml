@@ -33,6 +33,10 @@ services:
       HF_HOME: "/tmp/sicurre_onnx"
     volumes:
       - onnx_cache:/tmp/sicurre_onnx
+    networks:
+      sicurre-ml-internal:
+        aliases:
+          - app
     logging:
       # Structured JSON logs are emitted to stdout and captured here.
       # Alloy tails these logs and ships them to Grafana Cloud Loki.
@@ -58,6 +62,10 @@ services:
     command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
     depends_on:
       - app
+    networks:
+      sicurre-ml-internal:
+        aliases:
+          - alloy
     logging:
       driver: "json-file"
       options:
@@ -66,3 +74,8 @@ services:
 
 volumes:
   onnx_cache:
+
+networks:
+  sicurre-ml-internal:
+    name: sicurre-ml-internal
+    driver: bridge
