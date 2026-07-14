@@ -11,8 +11,8 @@
 # ── Stage 1: dependency install ───────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
-# Install uv from the official distroless image.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+# Pin the build tool and avoid a floating cross-registry build stage.
+RUN python -m pip install --no-cache-dir uv==0.11.14
 
 WORKDIR /app
 
@@ -28,6 +28,8 @@ RUN uv sync --group inference --no-dev --frozen
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
 FROM python:3.12-slim AS runtime
 
+ARG SERVICE_VERSION=0.1.0
+
 # Non-root user for security — never run production containers as root.
 RUN groupadd --system sicurre && useradd --system --gid sicurre --no-create-home sicurre
 
@@ -42,7 +44,8 @@ COPY src/ src/
 # The venv is at /app/.venv; add its bin to PATH so uv run resolves correctly.
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    SERVICE_VERSION=${SERVICE_VERSION}
 
 # ONNX model cache is written here at runtime; map a named volume in compose.
 ENV ONNX_MODEL_CACHE_DIR=/tmp/sicurre_onnx

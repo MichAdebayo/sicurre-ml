@@ -41,7 +41,7 @@ loki.source.docker "sicurre_ml_logs" {
 
 loki.process "sicurre_ml_logs" {
   stage.drop {
-    expression = `(?i)"(GET|HEAD) /(v1/)?(health|ready|metrics)(\?[^ ]*)? HTTP/[^\"]+"`
+    expression = `(?i)"(GET|HEAD) /(v1/)?(health|ready|metrics|docs|redoc|openapi\.json)(\?[^ ]*)? HTTP/[^\"]+" 200`
   }
   forward_to = [loki.write.grafana_cloud.receiver]
 }
@@ -78,6 +78,16 @@ prometheus.remote_write "grafana_cloud" {
   }
 }
 
+// Meta-monitor Alloy itself so scrape, Loki delivery, remote-write queue, and
+// discarded telemetry failures are visible without host-hour billed features.
+prometheus.exporter.self "sicurre_ml_alloy" {}
+
+prometheus.scrape "sicurre_ml_alloy" {
+  targets         = prometheus.exporter.self.sicurre_ml_alloy.targets
+  scrape_interval = "60s"
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
 otelcol.auth.basic "grafana_cloud" {
   username = sys.env("GRAFANA_OPEN_TELEMETRY_INSTANCE_ID")
   password = sys.env("GRAFANA_OPEN_TELEMETRY_API_TOKEN")
@@ -86,6 +96,34 @@ otelcol.auth.basic "grafana_cloud" {
 otelcol.receiver.otlp "sicurre_ml" {
   grpc { endpoint = "0.0.0.0:4317" }
   http { endpoint = "0.0.0.0:4318" }
+  output { traces = [otelcol.processor.tail_sampling.sicurre_ml.input] }
+}
+
+otelcol.processor.tail_sampling "sicurre_ml" {
+  decision_wait = "10s"
+  num_traces    = 1000
+
+  policy {
+    name = "errors"
+    type = "status_code"
+    status_code { status_codes = ["ERROR"] }
+  }
+
+  policy {
+    name = "slow_inference"
+    type = "latency"
+    latency { threshold_ms = 8000 }
+  }
+
+  policy {
+    name = "baseline"
+    type = "probabilistic"
+    probabilistic {
+      sampling_percentage = convert.to_number(sys.env("OTEL_TRACE_SAMPLE_PERCENT"))
+      hash_salt           = "sicurre-ml-production"
+    }
+  }
+
   output { traces = [otelcol.processor.batch.sicurre_ml.input] }
 }
 

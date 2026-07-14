@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import resource
+import sys
 from collections import Counter
 from dataclasses import dataclass, field
 from threading import Lock
@@ -28,6 +30,9 @@ class RuntimeTelemetry:
     label_total: Counter[str] = field(default_factory=Counter)
     llm_provider_total: Counter[str] = field(default_factory=Counter)
     error_total: Counter[str] = field(default_factory=Counter)
+    auth_failure_total: int = 0
+    rate_limit_total: int = 0
+    model_ready: int = 0
     total_latency_ms_sum: float = 0.0
     total_latency_ms_count: int = 0
     total_latency_ms_max: float = 0.0
@@ -36,6 +41,9 @@ class RuntimeTelemetry:
     stage_latency_ms_max: dict[str, float] = field(default_factory=dict)
     label_distribution_total: dict[str, float] = field(default_factory=dict)
     total_latency_buckets: Counter[float] = field(default_factory=Counter)
+    mode_latency_buckets: Counter[tuple[str, float]] = field(default_factory=Counter)
+    mode_latency_sum: dict[str, float] = field(default_factory=dict)
+    mode_latency_count: Counter[str] = field(default_factory=Counter)
 
     def observe(
         self,
@@ -48,6 +56,7 @@ class RuntimeTelemetry:
         stage_latencies_ms: dict[str, float] | None = None,
         llm_provider: str | None = None,
         error_type: str | None = None,
+        mode: str = "unknown",
     ) -> None:
         with self.lock:
             self.request_total += 1
@@ -55,13 +64,20 @@ class RuntimeTelemetry:
             self.total_latency_ms_sum += latency_ms
             self.total_latency_ms_count += 1
             self.total_latency_ms_max = max(self.total_latency_ms_max, latency_ms)
+            bounded_mode = mode if mode in {"local", "llm"} else "unknown"
+            self.mode_latency_sum[bounded_mode] = (
+                self.mode_latency_sum.get(bounded_mode, 0.0) + latency_ms
+            )
+            self.mode_latency_count[bounded_mode] += 1
 
             for bucket in _PROMETHEUS_BUCKETS_MS:
                 if latency_ms <= bucket:
                     self.total_latency_buckets[bucket] += 1
+                    self.mode_latency_buckets[(bounded_mode, bucket)] += 1
                     break
             else:
                 self.total_latency_buckets[float("inf")] += 1
+                self.mode_latency_buckets[(bounded_mode, float("inf"))] += 1
 
             if verdict:
                 self.verdict_total[verdict] += 1
@@ -105,6 +121,27 @@ class RuntimeTelemetry:
                 )
             cumulative += self.total_latency_buckets.get(float("inf"), 0)
 
+            mode_latency_lines: list[str] = []
+            for mode in sorted(self.mode_latency_count):
+                mode_cumulative = 0
+                for bucket in _PROMETHEUS_BUCKETS_MS:
+                    mode_cumulative += self.mode_latency_buckets.get((mode, bucket), 0)
+                    mode_latency_lines.append(
+                        'sicurre_inference_mode_request_latency_ms_bucket'
+                        f'{{mode="{mode}",le="{bucket}"}} {mode_cumulative}'
+                    )
+                mode_cumulative += self.mode_latency_buckets.get((mode, float("inf")), 0)
+                mode_latency_lines.extend(
+                    [
+                        'sicurre_inference_mode_request_latency_ms_bucket'
+                        f'{{mode="{mode}",le="+Inf"}} {mode_cumulative}',
+                        'sicurre_inference_mode_request_latency_ms_sum'
+                        f'{{mode="{mode}"}} {round(self.mode_latency_sum[mode], 6)}',
+                        'sicurre_inference_mode_request_latency_ms_count'
+                        f'{{mode="{mode}"}} {self.mode_latency_count[mode]}',
+                    ]
+                )
+
             verdict_lines = [
                 f'sicurre_inference_verdict_total{{verdict="{verdict}"}} {count}'
                 for verdict, count in sorted(self.verdict_total.items())
@@ -139,6 +176,24 @@ class RuntimeTelemetry:
             )
 
             lines = [
+                '# HELP sicurre_service_up Process liveness reported by the metrics endpoint.',
+                '# TYPE sicurre_service_up gauge',
+                'sicurre_service_up 1',
+                '# HELP sicurre_model_ready Last observed model readiness state.',
+                '# TYPE sicurre_model_ready gauge',
+                f'sicurre_model_ready {self.model_ready}',
+                '# HELP sicurre_auth_failure_total Rejected bearer authentication attempts.',
+                '# TYPE sicurre_auth_failure_total counter',
+                f'sicurre_auth_failure_total {self.auth_failure_total}',
+                '# HELP sicurre_rate_limit_total Requests rejected by application rate limiting.',
+                '# TYPE sicurre_rate_limit_total counter',
+                f'sicurre_rate_limit_total {self.rate_limit_total}',
+                '# HELP sicurre_process_resident_memory_bytes Process resident memory.',
+                '# TYPE sicurre_process_resident_memory_bytes gauge',
+                f'sicurre_process_resident_memory_bytes {_resident_memory_bytes()}',
+                '# HELP sicurre_process_cpu_seconds_total Process CPU time.',
+                '# TYPE sicurre_process_cpu_seconds_total counter',
+                f'sicurre_process_cpu_seconds_total {_process_cpu_seconds()}',
                 '# HELP sicurre_inference_requests_total Total classify requests processed.',
                 '# TYPE sicurre_inference_requests_total counter',
                 f'sicurre_inference_requests_total {self.request_total}',
@@ -152,6 +207,9 @@ class RuntimeTelemetry:
                 f'sicurre_inference_request_latency_ms_sum {round(self.total_latency_ms_sum, 6)}',
                 f'sicurre_inference_request_latency_ms_count {self.total_latency_ms_count}',
                 f'sicurre_inference_request_latency_ms_max {round(self.total_latency_ms_max, 6)}',
+                '# HELP sicurre_inference_mode_request_latency_ms Latency by bounded mode.',
+                '# TYPE sicurre_inference_mode_request_latency_ms histogram',
+                *mode_latency_lines,
                 '# HELP sicurre_inference_verdict_total Verdict counts returned by the service.',
                 '# TYPE sicurre_inference_verdict_total counter',
                 *verdict_lines,
@@ -180,13 +238,39 @@ class RuntimeTelemetry:
 
             return "\n".join(lines) + "\n"
 
+    def observe_auth_failure(self) -> None:
+        with self.lock:
+            self.auth_failure_total += 1
+
+    def observe_rate_limit(self) -> None:
+        with self.lock:
+            self.rate_limit_total += 1
+
+    def set_model_ready(self, ready: bool) -> None:
+        with self.lock:
+            self.model_ready = int(ready)
+
 
 runtime_telemetry = RuntimeTelemetry()
 
 
+def _resident_memory_bytes() -> int:
+    try:
+        with open("/proc/self/statm", encoding="utf-8") as statm:
+            resident_pages = int(statm.read().split()[1])
+        return resident_pages * os.sysconf("SC_PAGE_SIZE")
+    except (FileNotFoundError, IndexError, OSError, ValueError):
+        usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return int(usage * (1 if sys.platform == "darwin" else 1024))
+
+
+def _process_cpu_seconds() -> float:
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    return round(usage.ru_utime + usage.ru_stime, 6)
+
+
 def emit_classify_request_log(
     *,
-    request_id: str,
     status_code: int,
     latency_ms: float,
     verdict: str | None = None,
@@ -196,11 +280,10 @@ def emit_classify_request_log(
     llm_provider: str | None = None,
     model_version: str | None = None,
     error_type: str | None = None,
-    error_detail: str | None = None,
+    mode: str = "unknown",
 ) -> None:
     payload: dict[str, Any] = {
         "event": "classify_request",
-        "request_id": request_id,
         "status_code": status_code,
         "latency_ms": round(latency_ms, 3),
         "model_version": model_version
@@ -220,10 +303,17 @@ def emit_classify_request_log(
         payload["llm_provider"] = llm_provider or None
     if error_type is not None:
         payload["error_type"] = error_type
-    if error_detail is not None:
-        payload["error_detail"] = error_detail
-
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
+
+
+def emit_operational_log(event: str, *, category: str, status_code: int) -> None:
+    print(
+        json.dumps(
+            {"event": event, "category": category, "status_code": status_code},
+            sort_keys=True,
+        ),
+        flush=True,
+    )
 
 
 def observe_classify_request(
@@ -237,6 +327,7 @@ def observe_classify_request(
     llm_provider: str | None = None,
     model_version: str | None = None,
     error_type: str | None = None,
+    mode: str = "unknown",
 ) -> None:
     runtime_telemetry.observe(
         status_code=status_code,
@@ -247,4 +338,5 @@ def observe_classify_request(
         stage_latencies_ms=stage_latencies_ms,
         llm_provider=llm_provider,
         error_type=error_type,
+        mode=mode,
     )

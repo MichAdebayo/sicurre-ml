@@ -52,10 +52,10 @@ jobs:
         run: uv sync --group dev --group inference --frozen
 
       - name: Ruff — style and import checks
-        run: uv run ruff check src .github/scripts tests
+        run: uv run ruff check src .github/scripts deploy/scripts tests
 
       - name: Mypy — static type checks
-        run: uv run mypy src .github/scripts tests
+        run: uv run mypy src .github/scripts deploy/scripts tests
 
   # ── 3. Tests + coverage ──────────────────────────────────────────────────
   test:
@@ -107,7 +107,71 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: sicurre-ml:ci-check
           # Use GitHub Actions cache to speed up repeated builds
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan container image for high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: sicurre-ml:ci-check
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+  dependency-audit:
+    name: Production dependency vulnerability audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Export locked production dependencies
+        run: >-
+          uv export --no-default-groups --group inference --frozen
+          --format requirements-txt --no-hashes
+          --output-file /tmp/requirements-production.txt
+      - name: Audit production Python dependencies
+        # FastAPI 0.136.1 constrains Starlette below the published fixed line.
+        # Exact exceptions and compensating controls are documented in
+        # .github/security-audit-exceptions.md; no package-wide ignore is used.
+        run: |
+          uvx --python ${{ env.PYTHON_VERSION }} --from pip-audit pip-audit \
+            --requirement /tmp/requirements-production.txt \
+            --ignore-vuln PYSEC-2026-161 \
+            --ignore-vuln PYSEC-2026-249 \
+            --ignore-vuln PYSEC-2026-248 \
+            --ignore-vuln PYSEC-2026-2281 \
+            --ignore-vuln PYSEC-2026-2280
+
+  dependency-audit-all:
+    name: Training and tooling vulnerability report
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Export all locked dependency groups
+        run: >-
+          uv export --all-groups --frozen --format requirements-txt --no-hashes
+          --output-file /tmp/requirements-all.txt
+      - name: Report training and tooling vulnerabilities
+        run: |
+          set +e
+          uvx --python ${{ env.PYTHON_VERSION }} --from pip-audit pip-audit \
+            --requirement /tmp/requirements-all.txt
+          audit_status=$?
+          set -e
+          if [ "$audit_status" -ne 0 ]; then
+            echo "::warning title=Training/tooling dependency advisories::The non-production dependency audit found advisories. Review this step output; the production inference audit remains blocking."
+          fi
+          exit 0

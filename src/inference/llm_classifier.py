@@ -9,10 +9,19 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import textwrap
+import time
 from dataclasses import dataclass
+from threading import Lock
+from typing import Any, Mapping
 
 import httpx
+
+_RETRYABLE_STATUS_CODES = {429, 502, 503, 504}
+_circuit_lock = Lock()
+_circuit_failures: dict[str, int] = {}
+_circuit_opened_at: dict[str, float] = {}
 
 
 @dataclass
@@ -120,8 +129,9 @@ def _call_gemini(
     if not api_key:
         return None
     try:
-        resp = httpx.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        resp = _resilient_post(
+            provider="gemini",
+            url=f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
             params={"key": api_key},
             json={
                 "contents": [
@@ -138,13 +148,12 @@ def _call_gemini(
                 ],
                 "generationConfig": {"temperature": 0.3},
             },
-            timeout=20,
         )
         resp.raise_for_status()
         raw = resp.json()["candidates"][0]["content"]["parts"][0]["text"]
         return _parse_response(raw, provider="gemini")
-    except Exception as exc:
-        print(f"[llm] Gemini error: {exc}")
+    except Exception:
+        _emit_provider_event("gemini", "request_failed")
         return None
 
 
@@ -160,8 +169,9 @@ def _openai_compatible(
     provider: str,
 ) -> LLMResult | None:
     try:
-        resp = httpx.post(
-            f"{base_url}/chat/completions",
+        resp = _resilient_post(
+            provider=provider,
+            url=f"{base_url}/chat/completions",
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
@@ -178,13 +188,12 @@ def _openai_compatible(
                 ],
                 "response_format": {"type": "json_object"},
             },
-            timeout=20,
         )
         resp.raise_for_status()
         raw = resp.json()["choices"][0]["message"]["content"]
         return _parse_response(raw, provider=provider)
-    except Exception as exc:
-        print(f"[llm] {provider} error: {exc}")
+    except Exception:
+        _emit_provider_event(provider, "request_failed")
         return None
 
 
@@ -207,9 +216,102 @@ def _parse_response(raw: str, provider: str) -> LLMResult | None:
             explanation=explanation,
             provider=provider,
         )
-    except Exception as exc:
-        print(f"[llm] Parse error from {provider}: {exc} — raw: {raw[:200]}")
+    except Exception:
+        _emit_provider_event(provider, "invalid_response")
         return None
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return max(0.05, float(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default
+
+
+def _emit_provider_event(provider: str, category: str) -> None:
+    print(
+        json.dumps(
+            {"event": "llm_provider", "provider": provider, "category": category},
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
+def _circuit_allows(provider: str, now: float) -> bool:
+    cooldown = _env_float("LLM_CIRCUIT_BREAKER_COOLDOWN_SECONDS", 60.0)
+    with _circuit_lock:
+        opened_at = _circuit_opened_at.get(provider)
+        if opened_at is None:
+            return True
+        if now - opened_at >= cooldown:
+            _circuit_opened_at.pop(provider, None)
+            _circuit_failures[provider] = 0
+            return True
+        return False
+
+
+def _record_provider_result(provider: str, *, success: bool, now: float) -> None:
+    threshold = _env_int("LLM_CIRCUIT_BREAKER_FAILURES", 3)
+    with _circuit_lock:
+        if success:
+            _circuit_failures[provider] = 0
+            _circuit_opened_at.pop(provider, None)
+            return
+        failures = _circuit_failures.get(provider, 0) + 1
+        _circuit_failures[provider] = failures
+        if failures >= threshold:
+            _circuit_opened_at[provider] = now
+
+
+def _resilient_post(
+    provider: str,
+    url: str,
+    *,
+    headers: Mapping[str, str] | None = None,
+    params: Mapping[str, str] | None = None,
+    json: Any = None,
+) -> httpx.Response:
+    now = time.monotonic()
+    if not _circuit_allows(provider, now):
+        _emit_provider_event(provider, "circuit_open")
+        raise RuntimeError("LLM provider circuit is open")
+
+    attempts = _env_int("LLM_MAX_ATTEMPTS", 2)
+    connect_timeout = _env_float("LLM_CONNECT_TIMEOUT_SECONDS", 3.0)
+    response_timeout = _env_float("LLM_RESPONSE_TIMEOUT_SECONDS", 12.0)
+    backoff = _env_float("LLM_RETRY_BACKOFF_SECONDS", 0.25)
+    timeout = httpx.Timeout(response_timeout, connect=connect_timeout)
+
+    for attempt in range(attempts):
+        try:
+            response = httpx.post(
+                url,
+                headers=headers,
+                params=params,
+                json=json,
+                timeout=timeout,
+            )
+            if response.status_code not in _RETRYABLE_STATUS_CODES:
+                _record_provider_result(provider, success=True, now=time.monotonic())
+                return response
+            retryable = True
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout, httpx.PoolTimeout):
+            retryable = True
+
+        if attempt + 1 < attempts and retryable:
+            delay = backoff * (2**attempt) + random.uniform(0.0, backoff)
+            time.sleep(delay)
+
+    _record_provider_result(provider, success=False, now=time.monotonic())
+    raise RuntimeError("LLM provider exhausted bounded retries")
 
 
 # ---------------------------------------------------------------------------

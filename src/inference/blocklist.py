@@ -209,7 +209,7 @@ def _query_virustotal(url: str) -> BlocklistResult | None:
                 source="virustotal",
                 detail=f"{malicious}/{total} VT engines flagged as malicious",
             )
-    except Exception as exc:
-        print(f"[blocklist] VirusTotal error: {exc}")
+    except Exception:
+        print("[blocklist] VirusTotal request failed (provider_unavailable).")
 
     return None
