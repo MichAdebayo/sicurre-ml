@@ -59,6 +59,58 @@
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
       "targets": [{"expr": "sicurre_inference_model_info{stack=\"sicurre-ml\"}", "legendFormat": "{{version}}"}],
       "gridPos": {"h": 8, "w": 4, "x": 20, "y": 16}
+    },
+    {
+      "type": "timeseries", "title": "Latency by inference mode", "id": 9,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [
+        {"expr": "histogram_quantile(0.95, sum by (mode, le) (rate(sicurre_inference_mode_request_latency_ms_bucket{stack=\"sicurre-ml\"}[10m])))", "legendFormat": "p95 {{mode}}"},
+        {"expr": "histogram_quantile(0.99, sum by (mode, le) (rate(sicurre_inference_mode_request_latency_ms_bucket{stack=\"sicurre-ml\"}[10m])))", "legendFormat": "p99 {{mode}}"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+    },
+    {
+      "type": "timeseries", "title": "Authentication and rate-limit rejections", "id": 10,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [
+        {"expr": "sum(rate(sicurre_auth_failure_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "auth failures/s"},
+        {"expr": "sum(rate(sicurre_rate_limit_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "rate limited/s"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+    },
+    {
+      "type": "timeseries", "title": "Process memory and CPU", "id": 11,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [
+        {"expr": "sicurre_process_resident_memory_bytes{stack=\"sicurre-ml\"}", "legendFormat": "resident memory"},
+        {"expr": "rate(sicurre_process_cpu_seconds_total{stack=\"sicurre-ml\"}[5m])", "legendFormat": "CPU cores"}
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 32}
+    },
+    {
+      "type": "stat", "title": "ML active series / 3,000", "id": 12,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [{"expr": "count({stack=\"sicurre-ml\"})", "legendFormat": "active series"}],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 2100}, {"color": "red", "value": 2550}]}}, "overrides": []},
+      "gridPos": {"h": 8, "w": 4, "x": 8, "y": 32}
+    },
+    {
+      "type": "stat", "title": "Samples per minute", "id": 13,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [{"expr": "sum(rate({stack=\"sicurre-ml\"}[5m])) * 60", "legendFormat": "samples/min"}],
+      "gridPos": {"h": 8, "w": 4, "x": 12, "y": 32}
+    },
+    {
+      "type": "timeseries", "title": "Telemetry delivery and discards", "id": 14,
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "targets": [
+        {"expr": "sum(rate(loki_write_sent_bytes_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "Loki bytes/s"},
+        {"expr": "sum(rate(loki_write_dropped_bytes_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "Loki dropped bytes/s"},
+        {"expr": "sum(rate(otelcol_exporter_sent_spans{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "exported spans/s"},
+        {"expr": "sum(rate(otelcol_exporter_send_failed_spans{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "failed spans/s"}
+      ],
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 32}
     }
   ],
   "refresh": "1m",

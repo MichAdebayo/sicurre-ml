@@ -1,7 +1,9 @@
+name: sicurre-ml
+
 # ─────────────────────────────────────────────────────────────────────────────
 # docker-compose.yml — LOCAL DEVELOPMENT ONLY
 #
-# Starts the inference API and a Redis sidecar.
+# Starts the inference API.
 # Uses a local build so code changes are picked up on the next `docker compose up`.
 #
 # Usage:
@@ -16,30 +18,10 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
-    environment:
-      # Override REDIS_URL to use the compose network name instead of localhost.
-      REDIS_URL: "redis://redis:6379"
-    depends_on:
-      redis:
-        condition: service_healthy
     volumes:
       # Persist the ONNX model cache across container restarts so you don't
       # re-download 425 MB on every `docker compose up`.
       - onnx_cache:/tmp/sicurre_onnx
 
-  redis:
-    image: redis:7-alpine
-    ports:
-      # Expose Redis on localhost for local debugging (e.g. redis-cli).
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
 volumes:
   onnx_cache:
-  redis_data:
