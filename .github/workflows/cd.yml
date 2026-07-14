@@ -290,9 +290,21 @@ jobs:
               echo "Unable to resolve the running app container." >&2
               exit 1
             fi
+            alloy_container=$(docker compose -f docker-compose.prod.yml ps -q alloy)
+            if [ -z "$alloy_container" ]; then
+              echo "Alloy is not running; telemetry validation cannot continue." >&2
+              docker compose -f docker-compose.prod.yml ps alloy >&2
+              docker compose -f docker-compose.prod.yml logs --tail=100 alloy >&2
+              exit 1
+            fi
+            alloy_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$alloy_container")
+            if [ -z "$alloy_ip" ]; then
+              echo "Unable to resolve Alloy's Compose network address." >&2
+              exit 1
+            fi
             docker cp deploy/scripts/validate_observability.py \
               "$app_container:/tmp/validate_observability.py"
-            docker exec --env OBSERVABILITY_APP_URL=http://127.0.0.1:8000 --env OBSERVABILITY_ALLOY_URL=http://alloy:12345 "$app_container" /app/.venv/bin/python /tmp/validate_observability.py
+            docker exec --env OBSERVABILITY_APP_URL=http://127.0.0.1:8000 --env "OBSERVABILITY_ALLOY_URL=http://$alloy_ip:12345" "$app_container" /app/.venv/bin/python /tmp/validate_observability.py
 
   provision-dashboard:
     name: Provision Grafana dashboard
