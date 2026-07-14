@@ -9,6 +9,7 @@ from urllib.request import Request, urlopen
 
 APP_URL = os.getenv("OBSERVABILITY_APP_URL", "http://127.0.0.1:8000").rstrip("/")
 ALLOY_URL = os.getenv("OBSERVABILITY_ALLOY_URL", "http://alloy:12345").rstrip("/")
+PHASE = os.getenv("OBSERVABILITY_PHASE", "all").strip().lower()
 
 
 def _read(url: str) -> str:
@@ -43,8 +44,7 @@ def _require_delivery(metrics: str, candidates: tuple[str, ...], pipeline: str) 
         raise RuntimeError(f"{pipeline} has not recorded successful delivery")
 
 
-def main() -> None:
-    _read_with_retry(f"{ALLOY_URL}/-/ready")
+def _generate_app_telemetry() -> None:
     app_metrics = _read_with_retry(f"{APP_URL}/v1/metrics")
     if "sicurre_service_up 1" not in app_metrics:
         raise RuntimeError("Application telemetry endpoint is unhealthy")
@@ -66,6 +66,11 @@ def main() -> None:
         urlopen(request, timeout=15)  # noqa: S310
     except HTTPError:
         pass
+    print("Application telemetry generation passed: metrics, auth log, and sampled trace emitted.")
+
+
+def _validate_alloy_delivery() -> None:
+    _read_with_retry(f"{ALLOY_URL}/-/ready")
 
     # Allow at least one 60-second application and Alloy self-scrape cycle.
     time.sleep(65)
@@ -94,6 +99,15 @@ def main() -> None:
         "OTLP traces",
     )
     print("Observability validation passed: Alloy, scrape, Loki, and OTLP metrics present.")
+
+
+def main() -> None:
+    if PHASE not in {"all", "generate", "delivery"}:
+        raise RuntimeError(f"Unsupported observability validation phase: {PHASE}")
+    if PHASE in {"all", "generate"}:
+        _generate_app_telemetry()
+    if PHASE in {"all", "delivery"}:
+        _validate_alloy_delivery()
 
 
 if __name__ == "__main__":
