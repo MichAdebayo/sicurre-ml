@@ -1,139 +1,177 @@
 // Sicurre ML telemetry pipeline. Secrets are supplied by deploy/env.alloy.
 
 discovery.docker "sicurre_ml_containers" {
-  host = "unix:///var/run/docker.sock"
-  filter {
-    name   = "label"
-    values = ["com.docker.compose.project=sicurre-ml"]
-  }
+	host = "unix:///var/run/docker.sock"
+
+	filter {
+		name   = "label"
+		values = ["com.docker.compose.project=sicurre-ml"]
+	}
 }
 
 discovery.relabel "sicurre_ml_meta" {
-  targets = discovery.docker.sicurre_ml_containers.targets
-  rule {
-    source_labels = ["__meta_docker_container_name"]
-    regex         = "/(.*)"
-    target_label  = "container"
-  }
-  rule {
-    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
-    target_label  = "service"
-  }
-  rule {
-    target_label = "stack"
-    replacement  = "sicurre-ml"
-  }
-  rule {
-    target_label = "env"
-    replacement  = "production"
-  }
-  rule {
-    target_label = "server"
-    replacement  = "hetzner-cx33"
-  }
+	targets = discovery.docker.sicurre_ml_containers.targets
+
+	rule {
+		source_labels = ["__meta_docker_container_name"]
+		regex         = "/(.*)"
+		target_label  = "container"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		target_label  = "service"
+	}
+
+	rule {
+		target_label = "stack"
+		replacement  = "sicurre-ml"
+	}
+
+	rule {
+		target_label = "env"
+		replacement  = "production"
+	}
+
+	rule {
+		target_label = "server"
+		replacement  = "hetzner-cx33"
+	}
 }
 
 loki.source.docker "sicurre_ml_logs" {
-  host       = "unix:///var/run/docker.sock"
-  targets    = discovery.relabel.sicurre_ml_meta.output
-  forward_to = [loki.process.sicurre_ml_logs.receiver]
+	host       = "unix:///var/run/docker.sock"
+	targets    = discovery.relabel.sicurre_ml_meta.output
+	forward_to = [loki.process.sicurre_ml_logs.receiver]
 }
 
 loki.process "sicurre_ml_logs" {
-  stage.drop {
-    expression = `(?i)"(GET|HEAD) /(v1/)?(health|ready|metrics|docs|redoc|openapi\.json)(\?[^ ]*)? HTTP/[^\"]+" 200`
-  }
-  forward_to = [loki.write.grafana_cloud.receiver]
+	// service_name is Grafana's canonical cross-signal service identity and is
+	// required for reliable service discovery in Logs Drilldown.
+	stage.static_labels {
+		values = {
+			service_name = "sicurre-ml-inference",
+			stack        = "sicurre-ml",
+			env          = "production",
+		}
+	}
+
+	stage.drop {
+		expression = `(?i)"(GET|HEAD) /(v1/)?(health|ready|metrics|docs|redoc|openapi\.json)(\?[^ ]*)? HTTP/[^\"]+" 200`
+	}
+	forward_to = [loki.write.grafana_cloud.receiver]
 }
 
 loki.write "grafana_cloud" {
-  endpoint {
-    url = sys.env("GRAFANA_LOKI_URL")
-    basic_auth {
-      username = sys.env("GRAFANA_LOKI_USER")
-      password = sys.env("GRAFANA_LOKI_WRITE_API_TOKEN")
-    }
-  }
+	endpoint {
+		url = sys.env("GRAFANA_LOKI_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_LOKI_USER")
+			password = sys.env("GRAFANA_LOKI_WRITE_API_TOKEN")
+		}
+	}
 }
 
 prometheus.scrape "sicurre_ml_app" {
-  targets         = [{ "__address__" = "app:8000" }]
-  scrape_interval = "60s"
-  metrics_path    = "/v1/metrics"
-  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+	targets         = [{"__address__" = "app:8000"}]
+	scrape_interval = "60s"
+	metrics_path    = "/v1/metrics"
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
 }
 
 prometheus.remote_write "grafana_cloud" {
-  endpoint {
-    url = sys.env("GRAFANA_PROMETHEUS_REMOTE_WRITE_URL")
-    basic_auth {
-      username = sys.env("GRAFANA_PROMETHEUS_METRICS_USERNAME")
-      password = sys.env("GRAFANA_PROMETHEUS_METRICS_API_TOKEN")
-    }
-  }
-  external_labels = {
-    stack  = "sicurre-ml",
-    env    = "production",
-    server = "hetzner-cx33",
-  }
+	endpoint {
+		url = sys.env("GRAFANA_PROMETHEUS_REMOTE_WRITE_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_PROMETHEUS_METRICS_USERNAME")
+			password = sys.env("GRAFANA_PROMETHEUS_METRICS_API_TOKEN")
+		}
+	}
+	external_labels = {
+		service_name = "sicurre-ml-inference",
+		stack        = "sicurre-ml",
+		env          = "production",
+		server       = "hetzner-cx33",
+	}
 }
 
 // Meta-monitor Alloy itself so scrape, Loki delivery, remote-write queue, and
 // discarded telemetry failures are visible without host-hour billed features.
-prometheus.exporter.self "sicurre_ml_alloy" {}
+prometheus.exporter.self "sicurre_ml_alloy" { }
 
 prometheus.scrape "sicurre_ml_alloy" {
-  targets         = prometheus.exporter.self.sicurre_ml_alloy.targets
-  scrape_interval = "60s"
-  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+	targets         = prometheus.exporter.self.sicurre_ml_alloy.targets
+	scrape_interval = "60s"
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
 }
 
 otelcol.auth.basic "grafana_cloud" {
-  username = sys.env("GRAFANA_OPEN_TELEMETRY_INSTANCE_ID")
-  password = sys.env("GRAFANA_OPEN_TELEMETRY_API_TOKEN")
+	username = sys.env("GRAFANA_OPEN_TELEMETRY_INSTANCE_ID")
+	password = sys.env("GRAFANA_OPEN_TELEMETRY_API_TOKEN")
 }
 
 otelcol.receiver.otlp "sicurre_ml" {
-  grpc { endpoint = "0.0.0.0:4317" }
-  http { endpoint = "0.0.0.0:4318" }
-  output { traces = [otelcol.processor.tail_sampling.sicurre_ml.input] }
+	grpc {
+		endpoint = "0.0.0.0:4317"
+	}
+
+	http {
+		endpoint = "0.0.0.0:4318"
+	}
+
+	output {
+		traces = [otelcol.processor.tail_sampling.sicurre_ml.input]
+	}
 }
 
 otelcol.processor.tail_sampling "sicurre_ml" {
-  decision_wait = "10s"
-  num_traces    = 1000
+	decision_wait = "10s"
+	num_traces    = 1000
 
-  policy {
-    name = "errors"
-    type = "status_code"
-    status_code { status_codes = ["ERROR"] }
-  }
+	policy {
+		name = "errors"
+		type = "status_code"
 
-  policy {
-    name = "slow_inference"
-    type = "latency"
-    latency { threshold_ms = 8000 }
-  }
+		status_code {
+			status_codes = ["ERROR"]
+		}
+	}
 
-  policy {
-    name = "baseline"
-    type = "probabilistic"
-    probabilistic {
-      sampling_percentage = convert.to_number(sys.env("OTEL_TRACE_SAMPLE_PERCENT"))
-      hash_salt           = "sicurre-ml-production"
-    }
-  }
+	policy {
+		name = "slow_inference"
+		type = "latency"
 
-  output { traces = [otelcol.processor.batch.sicurre_ml.input] }
+		latency {
+			threshold_ms = 8000
+		}
+	}
+
+	policy {
+		name = "baseline"
+		type = "probabilistic"
+
+		probabilistic {
+			sampling_percentage = convert.to_number(sys.env("OTEL_TRACE_SAMPLE_PERCENT"))
+			hash_salt           = "sicurre-ml-production"
+		}
+	}
+
+	output {
+		traces = [otelcol.processor.batch.sicurre_ml.input]
+	}
 }
 
 otelcol.processor.batch "sicurre_ml" {
-  output { traces = [otelcol.exporter.otlphttp.grafana_cloud.input] }
+	output {
+		traces = [otelcol.exporter.otlphttp.grafana_cloud.input]
+	}
 }
 
 otelcol.exporter.otlphttp "grafana_cloud" {
-  client {
-    endpoint = sys.env("GRAFANA_OPEN_TELEMETRY_OTLP_ENDPOINT")
-    auth     = otelcol.auth.basic.grafana_cloud.handler
-  }
+	client {
+		endpoint = sys.env("GRAFANA_OPEN_TELEMETRY_OTLP_ENDPOINT")
+		auth     = otelcol.auth.basic.grafana_cloud.handler
+	}
 }

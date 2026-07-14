@@ -297,14 +297,19 @@ jobs:
               docker compose -f docker-compose.prod.yml logs --tail=100 alloy >&2
               exit 1
             fi
-            alloy_ip=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$alloy_container")
-            if [ -z "$alloy_ip" ]; then
-              echo "Unable to resolve Alloy's Compose network address." >&2
+            compose_network=$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}' "$app_container")
+            app_image=$(docker inspect --format '{{.Config.Image}}' "$app_container")
+            if [ -z "$compose_network" ] || [ -z "$app_image" ]; then
+              echo "Unable to resolve the app image or Compose network." >&2
               exit 1
             fi
-            docker cp deploy/scripts/validate_observability.py \
-              "$app_container:/tmp/validate_observability.py"
-            docker exec --env OBSERVABILITY_APP_URL=http://127.0.0.1:8000 --env "OBSERVABILITY_ALLOY_URL=http://$alloy_ip:12345" "$app_container" /app/.venv/bin/python /tmp/validate_observability.py
+            docker run --rm \
+              --network "$compose_network" \
+              --volume "$PWD/deploy/scripts/validate_observability.py:/tmp/validate_observability.py:ro" \
+              --env OBSERVABILITY_APP_URL=http://app:8000 \
+              --env OBSERVABILITY_ALLOY_URL=http://alloy:12345 \
+              "$app_image" \
+              /app/.venv/bin/python /tmp/validate_observability.py
 
   provision-dashboard:
     name: Provision Grafana dashboard
