@@ -123,6 +123,44 @@ jobs:
           exit-code: "1"
           trivyignores: .trivyignore
 
+  alloy-runtime:
+    name: Alloy runtime configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start pinned Alloy and verify runtime graph
+        run: |
+          set -euo pipefail
+          trap 'docker logs alloy-runtime-check 2>/dev/null || true; docker rm -f alloy-runtime-check 2>/dev/null || true' EXIT
+          docker run -d --name alloy-runtime-check \
+            --env GRAFANA_LOKI_URL=http://example.invalid/loki/api/v1/push \
+            --env GRAFANA_LOKI_USER=test \
+            --env GRAFANA_LOKI_WRITE_API_TOKEN=test \
+            --env GRAFANA_PROMETHEUS_REMOTE_WRITE_URL=http://example.invalid/api/prom/push \
+            --env GRAFANA_PROMETHEUS_METRICS_USERNAME=test \
+            --env GRAFANA_PROMETHEUS_METRICS_API_TOKEN=test \
+            --env GRAFANA_OPEN_TELEMETRY_INSTANCE_ID=test \
+            --env GRAFANA_OPEN_TELEMETRY_API_TOKEN=test \
+            --env GRAFANA_OPEN_TELEMETRY_OTLP_ENDPOINT=http://example.invalid/otlp \
+            --env OTEL_TRACE_SAMPLE_PERCENT=10 \
+            --publish 127.0.0.1:12345:12345 \
+            --volume "$PWD/deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro" \
+            grafana/alloy:v1.16.1@sha256:51aeb9d829239345070619dad3edd6873186f913c84f45b365b74574fcb38ec0 \
+            run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+          for attempt in $(seq 1 15); do
+            if [ "$(docker inspect --format '{{.State.Running}}' alloy-runtime-check)" != "true" ]; then
+              echo "Pinned Alloy exited during runtime graph evaluation." >&2
+              exit 1
+            fi
+            if curl --fail --silent http://127.0.0.1:12345/-/ready >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Pinned Alloy did not become ready." >&2
+          exit 1
+
   dependency-audit:
     name: Production dependency vulnerability audit
     runs-on: ubuntu-latest
