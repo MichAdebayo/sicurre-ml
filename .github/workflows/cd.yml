@@ -159,6 +159,15 @@ jobs:
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
 
+            loki_url=$(sed -n 's/^GRAFANA_LOKI_URL=//p' deploy/env.alloy | tail -1)
+            case "$loki_url" in
+              https://*/loki/api/v1/push) ;;
+              *)
+                echo "deploy/env.alloy GRAFANA_LOKI_URL must be an HTTPS Loki push endpoint ending in /loki/api/v1/push." >&2
+                exit 1
+                ;;
+            esac
+
             previous_tag=$(sed -n 's/^IMAGE_TAG=//p' .env | tail -1)
             if [ -n "$previous_tag" ]; then
               printf '%s\n' "$previous_tag" > .previous-image-tag
@@ -346,13 +355,17 @@ jobs:
 
             # Inspect Alloy from its own network namespace. The delivery phase
             # reaches Alloy over loopback and never depends on a service alias.
-            docker run --rm \
-              --network "container:$alloy_container" \
-              --volume "$PWD/deploy/scripts/validate_observability.py:/tmp/validate_observability.py:ro" \
-              --env OBSERVABILITY_PHASE=delivery \
-              --env OBSERVABILITY_ALLOY_URL=http://127.0.0.1:12345 \
-              "$app_image" \
-              /app/.venv/bin/python /tmp/validate_observability.py
+            if ! docker run --rm \
+                --network "container:$alloy_container" \
+                --volume "$PWD/deploy/scripts/validate_observability.py:/tmp/validate_observability.py:ro" \
+                --env OBSERVABILITY_PHASE=delivery \
+                --env OBSERVABILITY_ALLOY_URL=http://127.0.0.1:12345 \
+                "$app_image" \
+                /app/.venv/bin/python /tmp/validate_observability.py; then
+              echo "Alloy delivery validation failed; recent ML-owned Alloy logs follow." >&2
+              docker compose -f docker-compose.prod.yml logs --tail=150 alloy >&2
+              exit 1
+            fi
 
   provision-dashboard:
     name: Provision Grafana dashboard
