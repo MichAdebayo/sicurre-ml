@@ -78,6 +78,8 @@ def test_alloy_uses_shared_drilldown_service_identity() -> None:
     assert "convert.to_number" not in config
     assert 'loki.source.api "sicurre_ml_smoke"' in config
     assert 'listen_address = "127.0.0.1"' in config
+    assert 'key       = "http.status_code"' in config
+    assert 'key       = "http.response.status_code"' in config
 
 
 def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:

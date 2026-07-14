@@ -150,6 +150,31 @@ otelcol.processor.tail_sampling "sicurre_ml" {
 		}
 	}
 
+	// OpenTelemetry HTTP instrumentation does not mark 401 responses as span
+	// errors. Preserve authentication failures explicitly across both legacy
+	// and stable HTTP semantic-convention attribute names.
+	policy {
+		name = "authentication_failures_legacy"
+		type = "numeric_attribute"
+
+		numeric_attribute {
+			key       = "http.status_code"
+			min_value = 401
+			max_value = 401
+		}
+	}
+
+	policy {
+		name = "authentication_failures_stable"
+		type = "numeric_attribute"
+
+		numeric_attribute {
+			key       = "http.response.status_code"
+			min_value = 401
+			max_value = 401
+		}
+	}
+
 	policy {
 		name = "slow_inference"
 		type = "latency"
