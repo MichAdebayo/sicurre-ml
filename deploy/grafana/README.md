@@ -25,7 +25,10 @@ No Python, Node, `jq`, or other parser is installed on or required from the
 host. The repository-owned application image is the deterministic provisioning
 runtime.
 
-The provisioner resolves the exact datasource names
-`grafanacloud-sicurre-prom`, `grafanacloud-sicurre-logs`, and
-`grafanacloud-sicurre-traces`, creates the `Sicurre ML` folder if absent, and
-upserts dashboard UID `sicurre-ml-runtime`.
+The provisioner resolves the canonical metrics datasource
+`grafanacloud-sicurre-prom`, creates the `Sicurre ML` folder if absent, and
+upserts dashboard UID `sicurre-ml-runtime`. Logs and traces use the shared
+Grafana Cloud Loki and Tempo datasources; Drilldown separates this workload
+with `stack="sicurre-ml"` and `service_name="sicurre-ml-inference"` (or
+`sicurre-ml-alloy` for collector self-telemetry). Separate per-service
+datasources are neither required nor provisioned.

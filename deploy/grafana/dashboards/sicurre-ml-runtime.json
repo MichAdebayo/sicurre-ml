@@ -18,7 +18,7 @@
     {
       "type": "stat", "title": "Metrics scrape health", "id": 3,
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [{"expr": "up{job=\"integrations/sicurre_ml_app\"} or up{stack=\"sicurre-ml\"}", "legendFormat": "app"}],
+      "targets": [{"expr": "up{stack=\"sicurre-ml\",service_name=\"sicurre-ml-inference\"}", "legendFormat": "app"}],
       "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}
     },
     {

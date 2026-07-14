@@ -24,6 +24,20 @@ discovery.relabel "sicurre_ml_meta" {
 	}
 
 	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		regex         = "app"
+		target_label  = "service_name"
+		replacement   = "sicurre-ml-inference"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+		regex         = "alloy"
+		target_label  = "service_name"
+		replacement   = "sicurre-ml-alloy"
+	}
+
+	rule {
 		target_label = "stack"
 		replacement  = "sicurre-ml"
 	}
@@ -53,22 +67,24 @@ loki.source.api "sicurre_ml_smoke" {
 		listen_address = "127.0.0.1"
 		listen_port    = 3500
 	}
-	forward_to = [loki.process.sicurre_ml_logs.receiver]
+	forward_to = [loki.process.sicurre_ml_smoke.receiver]
 }
 
 loki.process "sicurre_ml_logs" {
-	// service_name is Grafana's canonical cross-signal service identity and is
-	// required for reliable service discovery in Logs Drilldown.
+	stage.drop {
+		expression = `(?i)"(GET|HEAD) /(v1/)?(health|ready|metrics|docs|redoc|openapi\.json)(\?[^ ]*)? HTTP/[^\"]+" 200`
+	}
+	forward_to = [loki.write.grafana_cloud.receiver]
+}
+
+loki.process "sicurre_ml_smoke" {
 	stage.static_labels {
 		values = {
 			service_name = "sicurre-ml-inference",
 			stack        = "sicurre-ml",
 			env          = "production",
+			server       = "hetzner-cx33",
 		}
-	}
-
-	stage.drop {
-		expression = `(?i)"(GET|HEAD) /(v1/)?(health|ready|metrics|docs|redoc|openapi\.json)(\?[^ ]*)? HTTP/[^\"]+" 200`
 	}
 	forward_to = [loki.write.grafana_cloud.receiver]
 }
@@ -85,7 +101,10 @@ loki.write "grafana_cloud" {
 }
 
 prometheus.scrape "sicurre_ml_app" {
-	targets         = [{"__address__" = "app:8000"}]
+	targets = [{
+		"__address__"  = "app:8000",
+		"service_name" = "sicurre-ml-inference",
+	}]
 	scrape_interval = "60s"
 	metrics_path    = "/v1/metrics"
 	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
@@ -97,23 +116,23 @@ prometheus.remote_write "grafana_cloud" {
 
 		basic_auth {
 			username = sys.env("GRAFANA_PROMETHEUS_METRICS_USERNAME")
-			password = sys.env("GRAFANA_PROMETHEUS_METRICS_API_TOKEN")
+			password = sys.env("GRAFANA_PROMETHEUS_WRITE_API_TOKEN")
 		}
 	}
 	external_labels = {
-		service_name = "sicurre-ml-inference",
-		stack        = "sicurre-ml",
-		env          = "production",
-		server       = "hetzner-cx33",
+		stack  = "sicurre-ml",
+		env    = "production",
+		server = "hetzner-cx33",
 	}
 }
 
 // Meta-monitor Alloy itself so scrape, Loki delivery, remote-write queue, and
 // discarded telemetry failures are visible without host-hour billed features.
-prometheus.exporter.self "sicurre_ml_alloy" { }
-
 prometheus.scrape "sicurre_ml_alloy" {
-	targets         = prometheus.exporter.self.sicurre_ml_alloy.targets
+	targets = [{
+		"__address__"  = "127.0.0.1:12345",
+		"service_name" = "sicurre-ml-alloy",
+	}]
 	scrape_interval = "60s"
 	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
 }
