@@ -51,8 +51,19 @@ def main() -> None:
 
     # Generate an authentication failure so the error tail-sampling policy and
     # security log path have deterministic post-deployment traffic.
+    # A sampled W3C parent plus an invalid bearer deterministically exercises
+    # the privacy-safe authentication log and error-trace paths. No email or
+    # request body is sent.
+    request = Request(
+        f"{APP_URL}/v1/classify",
+        method="POST",
+        headers={
+            "Authorization": "Bearer observability-validation-invalid",
+            "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+        },
+    )
     try:
-        urlopen(Request(f"{APP_URL}/v1/classify", method="POST"), timeout=15)  # noqa: S310
+        urlopen(request, timeout=15)  # noqa: S310
     except HTTPError:
         pass
 
