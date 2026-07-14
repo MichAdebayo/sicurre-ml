@@ -1,0 +1,5 @@
+# Reviewed 2026-07-14. See .github/security-audit-exceptions.md.
+# StaticFiles is not mounted by sicurre-ml.
+CVE-2026-48818
+# sicurre-ml accepts bounded JSON only; it does not call request.form().
+CVE-2026-54283

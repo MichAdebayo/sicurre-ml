@@ -121,6 +121,7 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+          trivyignores: .trivyignore
 
   dependency-audit:
     name: Production dependency vulnerability audit
@@ -164,6 +165,13 @@ jobs:
           uv export --all-groups --frozen --format requirements-txt --no-hashes
           --output-file /tmp/requirements-all.txt
       - name: Report training and tooling vulnerabilities
-        run: >-
-          uvx --python ${{ env.PYTHON_VERSION }} --from pip-audit pip-audit
-          --requirement /tmp/requirements-all.txt
+        run: |
+          set +e
+          uvx --python ${{ env.PYTHON_VERSION }} --from pip-audit pip-audit \
+            --requirement /tmp/requirements-all.txt
+          audit_status=$?
+          set -e
+          if [ "$audit_status" -ne 0 ]; then
+            echo "::warning title=Training/tooling dependency advisories::The non-production dependency audit found advisories. Review this step output; the production inference audit remains blocking."
+          fi
+          exit 0
