@@ -139,7 +139,7 @@ jobs:
             --env GRAFANA_LOKI_WRITE_API_TOKEN=test \
             --env GRAFANA_PROMETHEUS_REMOTE_WRITE_URL=http://example.invalid/api/prom/push \
             --env GRAFANA_PROMETHEUS_METRICS_USERNAME=test \
-            --env GRAFANA_PROMETHEUS_METRICS_API_TOKEN=test \
+            --env GRAFANA_PROMETHEUS_WRITE_API_TOKEN=test \
             --env GRAFANA_OPEN_TELEMETRY_INSTANCE_ID=test \
             --env GRAFANA_OPEN_TELEMETRY_API_TOKEN=test \
             --env GRAFANA_OPEN_TELEMETRY_OTLP_ENDPOINT=http://example.invalid/otlp \

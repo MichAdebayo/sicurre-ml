@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -42,6 +43,8 @@ def test_cd_force_recreates_alloy_after_config_sync() -> None:
     assert "docker compose -f docker-compose.prod.yml logs --tail=150 alloy" in workflow
     assert "https://*/loki/api/v1/push" in workflow
     assert "must be an HTTPS Loki push endpoint" in workflow
+    assert "GRAFANA_PROMETHEUS_WRITE_API_TOKEN" in workflow
+    assert "deploy/env.alloy is missing a non-empty ${required_var}" in workflow
 
 
 def test_ci_starts_pinned_alloy_runtime_graph() -> None:
@@ -72,14 +75,53 @@ def test_remote_cd_scripts_do_not_require_host_python() -> None:
 def test_alloy_uses_shared_drilldown_service_identity() -> None:
     config = Path("deploy/alloy/config.alloy").read_text(encoding="utf-8")
 
-    assert config.count('service_name = "sicurre-ml-inference"') == 2
-    assert config.count('stack        = "sicurre-ml"') == 2
+    assert 'replacement   = "sicurre-ml-inference"' in config
+    assert 'replacement   = "sicurre-ml-alloy"' in config
+    assert '"service_name" = "sicurre-ml-inference"' in config
+    assert '"service_name" = "sicurre-ml-alloy"' in config
+    assert 'password = sys.env("GRAFANA_PROMETHEUS_WRITE_API_TOKEN")' in config
+    assert "GRAFANA_PROMETHEUS_METRICS_API_TOKEN" not in config
+    remote_write = config.split('prometheus.remote_write "grafana_cloud"', maxsplit=1)[1].split(
+        "// Meta-monitor", maxsplit=1
+    )[0]
+    assert "service_name" not in remote_write
     assert 'encoding.from_json(sys.env("OTEL_TRACE_SAMPLE_PERCENT"))' in config
     assert "convert.to_number" not in config
     assert 'loki.source.api "sicurre_ml_smoke"' in config
     assert 'listen_address = "127.0.0.1"' in config
     assert 'key       = "http.status_code"' in config
     assert 'key       = "http.response.status_code"' in config
+
+
+def test_production_app_emits_candidate_traces_to_ml_alloy() -> None:
+    compose = Path("docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    app = compose.split("  app:", maxsplit=1)[1].split("  alloy:", maxsplit=1)[0]
+    assert 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://alloy:4317"' in app
+    assert 'OTEL_EXPORTER_OTLP_INSECURE: "true"' in app
+    assert 'OTEL_TRACE_SAMPLE_RATIO: "${OTEL_TRACE_SAMPLE_RATIO:-1.0}"' in app
+    assert "GRAFANA_" not in app
+
+
+def test_dashboard_and_alerts_distinguish_app_from_alloy() -> None:
+    dashboard = json.loads(
+        Path("deploy/grafana/dashboards/sicurre-ml-runtime.json").read_text(encoding="utf-8")
+    )
+    alerts = json.loads(
+        Path("deploy/grafana/alerts/sicurre-ml-alerts.json").read_text(encoding="utf-8")
+    )
+
+    service_up = next(
+        panel for panel in dashboard["panels"] if panel["title"] == "Metrics scrape health"
+    )
+    assert 'service_name="sicurre-ml-inference"' in service_up["targets"][0]["expr"]
+    alert_expressions = {alert["uid"]: alert["expr"] for alert in alerts}
+    assert 'service_name="sicurre-ml-inference"' in alert_expressions[
+        "sicurre-ml-unavailable"
+    ]
+    assert 'service_name="sicurre-ml-alloy"' in alert_expressions[
+        "sicurre-ml-telemetry-scrape"
+    ]
 
 
 def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:
