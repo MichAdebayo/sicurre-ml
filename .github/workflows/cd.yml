@@ -305,6 +305,8 @@ jobs:
             fi
             docker run --rm \
               --network "$compose_network" \
+              --link "$app_container:app" \
+              --link "$alloy_container:alloy" \
               --volume "$PWD/deploy/scripts/validate_observability.py:/tmp/validate_observability.py:ro" \
               --env OBSERVABILITY_APP_URL=http://app:8000 \
               --env OBSERVABILITY_ALLOY_URL=http://alloy:12345 \
