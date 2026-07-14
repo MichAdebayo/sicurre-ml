@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -37,3 +38,10 @@ def test_dashboard_provisioning_uses_container_python() -> None:
     assert "docker run --rm" in dashboard_job
     assert "/app/.venv/bin/python /workspace/provision_dashboard.py" in dashboard_job
     assert "\n              python /workspace/provision_dashboard.py" not in dashboard_job
+
+
+def test_remote_cd_scripts_do_not_require_host_python() -> None:
+    workflow = Path(".github/workflows/cd.yml").read_text(encoding="utf-8")
+
+    assert re.search(r"(?m)^\s+python(?:3)?\s", workflow) is None
+    assert "previous_digest=$(sed -n 's/^CONTAINER_IMAGE_DIGEST=//p' .env | tail -1)" in workflow
