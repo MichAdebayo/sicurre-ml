@@ -27,6 +27,8 @@ def test_observability_validation_uses_compose_network() -> None:
     assert "docker compose -f docker-compose.prod.yml ps -q alloy" in observability_job
     assert ".NetworkID" in observability_job
     assert '--network "$compose_network"' in observability_job
+    assert '--link "$app_container:app"' in observability_job
+    assert '--link "$alloy_container:alloy"' in observability_job
     assert "OBSERVABILITY_ALLOY_URL=http://alloy:12345" in observability_job
     assert "docker compose -f docker-compose.prod.yml logs --tail=100 alloy" in observability_job
     assert "validate_observability.py:/tmp/validate_observability.py:ro" in observability_job
