@@ -286,14 +286,18 @@ jobs:
           script: |
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
-            app_image=$(docker compose -f docker-compose.prod.yml images -q app)
-            network=$(docker inspect "$(docker compose -f docker-compose.prod.yml ps -q app)" \
-              --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}')
-            docker run --rm \
-              --network "$network" \
-              --volume "$PWD/deploy/scripts:/workspace:ro" \
-              "$app_image" \
-              python /workspace/validate_observability.py
+            app_container=$(docker compose -f docker-compose.prod.yml ps -q app)
+            if [ -z "$app_container" ]; then
+              echo "Unable to resolve the running app container." >&2
+              exit 1
+            fi
+            docker cp deploy/scripts/validate_observability.py \
+              "$app_container:/tmp/validate_observability.py"
+            docker exec \
+              --env OBSERVABILITY_APP_URL=http://127.0.0.1:8000 \
+              --env OBSERVABILITY_ALLOY_URL=http://alloy:12345 \
+              "$app_container" \
+              python /tmp/validate_observability.py
 
   provision-dashboard:
     name: Provision Grafana dashboard
