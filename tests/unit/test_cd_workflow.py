@@ -24,7 +24,10 @@ def test_observability_validation_uses_running_app_network() -> None:
 
     assert "docker exec" in observability_job
     assert "OBSERVABILITY_APP_URL=http://127.0.0.1:8000" in observability_job
-    assert "OBSERVABILITY_ALLOY_URL=http://alloy:12345" in observability_job
+    assert "docker compose -f docker-compose.prod.yml ps -q alloy" in observability_job
+    assert "docker inspect --format" in observability_job
+    assert "OBSERVABILITY_ALLOY_URL=http://$alloy_ip:12345" in observability_job
+    assert "docker compose -f docker-compose.prod.yml logs --tail=100 alloy" in observability_job
     assert "docker cp deploy/scripts/validate_observability.py" in observability_job
     assert "docker run" not in observability_job
     assert "--network" not in observability_job
