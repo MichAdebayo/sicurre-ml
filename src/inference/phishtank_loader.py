@@ -76,9 +76,7 @@ def _load_phishtank_urls_from_file() -> list[str]:
         return []
 
     if not path.exists():
-        print(
-            f"[phishtank] File fallback not found at {path}; continuing without PhishTank URLs."
-        )
+        print("[phishtank] File fallback unavailable; continuing without PhishTank URLs.")
         return []
 
     with path.open() as fh:
@@ -109,11 +107,11 @@ def load_phishtank_urls() -> list[str]:
             print(f"[phishtank] Loaded {len(urls)} URLs from Neon database.")
             try:
                 _write_fallback_file(urls)
-            except Exception as exc:
-                print(f"[phishtank] Fallback write skipped ({exc}).")
+            except Exception:
+                print("[phishtank] Fallback write skipped (write_failed).")
             return urls
-        except Exception as exc:
-            print(f"[phishtank] Database load failed ({exc}), falling back to file.")
+        except Exception:
+            print("[phishtank] Database load failed (source_unavailable); using fallback.")
 
     return _load_phishtank_urls_from_file()
 

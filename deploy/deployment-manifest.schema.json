@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sicurre.com/schemas/ml-deployment-manifest-v1.json",
+  "title": "Sicurre ML deployment manifest",
+  "type": "object",
+  "required": ["schema_version", "service", "model", "dataset", "deployment"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "service": {
+      "type": "object",
+      "required": ["name", "version", "api_contract"],
+      "properties": {
+        "name": {"const": "sicurre-ml"},
+        "version": {"type": "string"},
+        "api_contract": {"const": "v1"}
+      }
+    },
+    "model": {
+      "type": "object",
+      "required": ["version", "revision"],
+      "properties": {
+        "version": {"type": "string"},
+        "revision": {"type": "string"}
+      }
+    },
+    "dataset": {
+      "type": "object",
+      "required": ["version"],
+      "properties": {"version": {"type": "string"}}
+    },
+    "deployment": {
+      "type": "object",
+      "required": ["revision", "container_image_digest"],
+      "properties": {
+        "revision": {"type": "string"},
+        "container_image_digest": {"type": "string"}
+      }
+    }
+  }
+}
