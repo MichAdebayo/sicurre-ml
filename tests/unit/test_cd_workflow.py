@@ -40,6 +40,8 @@ def test_cd_force_recreates_alloy_after_config_sync() -> None:
     assert "docker compose -f docker-compose.prod.yml up -d --force-recreate alloy" in workflow
     assert "ML-owned Alloy failed to remain running" in workflow
     assert "docker compose -f docker-compose.prod.yml logs --tail=150 alloy" in workflow
+    assert "https://*/loki/api/v1/push" in workflow
+    assert "must be an HTTPS Loki push endpoint" in workflow
 
 
 def test_ci_starts_pinned_alloy_runtime_graph() -> None:
@@ -74,6 +76,10 @@ def test_alloy_uses_shared_drilldown_service_identity() -> None:
     assert config.count('stack        = "sicurre-ml"') == 2
     assert 'encoding.from_json(sys.env("OTEL_TRACE_SAMPLE_PERCENT"))' in config
     assert "convert.to_number" not in config
+    assert 'loki.source.api "sicurre_ml_smoke"' in config
+    assert 'listen_address = "127.0.0.1"' in config
+    assert 'key       = "http.status_code"' in config
+    assert 'key       = "http.response.status_code"' in config
 
 
 def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:
@@ -82,4 +88,5 @@ def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:
     assert '"Authorization": "Bearer observability-validation-invalid"' in validator
     assert '"traceparent":' in validator
     assert "Request(" in validator
-    assert "data=" not in validator
+    assert "telemetry_delivery_validation" in validator
+    assert "loki_source_docker_target_entries_total" in validator

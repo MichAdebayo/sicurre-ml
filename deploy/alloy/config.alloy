@@ -45,6 +45,17 @@ loki.source.docker "sicurre_ml_logs" {
 	forward_to = [loki.process.sicurre_ml_logs.receiver]
 }
 
+// Container-local receiver used only by the deterministic CD delivery smoke.
+// It is not published by Compose and all entries still traverse loki.process
+// and the authenticated Grafana Cloud writer.
+loki.source.api "sicurre_ml_smoke" {
+	http {
+		listen_address = "127.0.0.1"
+		listen_port    = 3500
+	}
+	forward_to = [loki.process.sicurre_ml_logs.receiver]
+}
+
 loki.process "sicurre_ml_logs" {
 	// service_name is Grafana's canonical cross-signal service identity and is
 	// required for reliable service discovery in Logs Drilldown.
@@ -136,6 +147,31 @@ otelcol.processor.tail_sampling "sicurre_ml" {
 
 		status_code {
 			status_codes = ["ERROR"]
+		}
+	}
+
+	// OpenTelemetry HTTP instrumentation does not mark 401 responses as span
+	// errors. Preserve authentication failures explicitly across both legacy
+	// and stable HTTP semantic-convention attribute names.
+	policy {
+		name = "authentication_failures_legacy"
+		type = "numeric_attribute"
+
+		numeric_attribute {
+			key       = "http.status_code"
+			min_value = 401
+			max_value = 401
+		}
+	}
+
+	policy {
+		name = "authentication_failures_stable"
+		type = "numeric_attribute"
+
+		numeric_attribute {
+			key       = "http.response.status_code"
+			min_value = 401
+			max_value = 401
 		}
 	}
 
