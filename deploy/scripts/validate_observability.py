@@ -41,7 +41,20 @@ def _metric_sum(metrics: str, metric_name: str) -> float:
 
 def _require_delivery(metrics: str, candidates: tuple[str, ...], pipeline: str) -> None:
     if not any(_metric_sum(metrics, name) > 0 for name in candidates):
-        raise RuntimeError(f"{pipeline} has not recorded successful delivery")
+        counters = ", ".join(f"{name}={_metric_sum(metrics, name):g}" for name in candidates)
+        raise RuntimeError(f"{pipeline} has not recorded successful delivery ({counters})")
+
+
+def _push_alloy_loki_smoke() -> None:
+    request = Request(
+        "http://127.0.0.1:3500/loki/api/v1/raw",
+        data=b'{"event":"telemetry_delivery_validation","service":"sicurre-ml-inference"}\n',
+        method="POST",
+        headers={"Content-Type": "application/x-ndjson"},
+    )
+    with urlopen(request, timeout=15) as response:  # noqa: S310
+        if response.status not in {200, 204}:
+            raise RuntimeError(f"Alloy Loki smoke receiver returned HTTP {response.status}")
 
 
 def _generate_app_telemetry() -> None:
@@ -71,6 +84,7 @@ def _generate_app_telemetry() -> None:
 
 def _validate_alloy_delivery() -> None:
     _read_with_retry(f"{ALLOY_URL}/-/ready")
+    _push_alloy_loki_smoke()
 
     # Allow at least one 60-second application and Alloy self-scrape cycle.
     time.sleep(65)
@@ -83,6 +97,11 @@ def _validate_alloy_delivery() -> None:
     missing = [family for family in required_families if family not in alloy_metrics]
     if missing:
         raise RuntimeError(f"Alloy telemetry families missing: {', '.join(missing)}")
+    _require_delivery(
+        alloy_metrics,
+        ("loki_source_docker_target_entries_total",),
+        "Docker log source",
+    )
     _require_delivery(
         alloy_metrics,
         ("prometheus_remote_storage_samples_total",),
