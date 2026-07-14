@@ -163,9 +163,12 @@ jobs:
             if [ -n "$previous_tag" ]; then
               printf '%s\n' "$previous_tag" > .previous-image-tag
             fi
+            previous_digest=$(sed -n 's/^CONTAINER_IMAGE_DIGEST=//p' .env | tail -1)
+            if [ -n "$previous_digest" ]; then
+              printf '%s\n' "$previous_digest" > .previous-image-digest
+            fi
             if [ -f deploy/current-deployment.json ]; then
               cp deploy/current-deployment.json deploy/previous-deployment.json
-              python -c 'import json; print(json.load(open("deploy/current-deployment.json"))["deployment"]["container_image_digest"])' > .previous-image-digest
             fi
 
             # Write IMAGE_TAG and GHCR_OWNER into .env so docker compose resolves them.
