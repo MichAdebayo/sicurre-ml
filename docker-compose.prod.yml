@@ -53,6 +53,10 @@ services:
     restart: unless-stopped
     env_file:
       - ./deploy/env.alloy
+    environment:
+      # Non-secret deployment setting. The server root .env may override it;
+      # otherwise use the production telemetry-budget default.
+      OTEL_TRACE_SAMPLE_PERCENT: ${OTEL_TRACE_SAMPLE_PERCENT:-10}
     volumes:
       - ./deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro
       # Docker socket: needed for Alloy to discover container log paths.

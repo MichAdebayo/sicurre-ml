@@ -205,6 +205,33 @@ jobs:
             # telemetry graph and rejoins the explicit internal network.
             docker compose -f docker-compose.prod.yml up -d --force-recreate alloy
 
+            # Compose returns before restart-policy crash loops become visible.
+            # Require a stable running process and surface its own logs here.
+            alloy_stable_checks=0
+            previous_restarts=-1
+            for attempt in $(seq 1 15); do
+              alloy_container=$(docker compose -f docker-compose.prod.yml ps -aq alloy)
+              alloy_status=$(docker inspect --format '{{.State.Status}}' "$alloy_container" 2>/dev/null || true)
+              alloy_restarts=$(docker inspect --format '{{.RestartCount}}' "$alloy_container" 2>/dev/null || echo -1)
+              if [ "$alloy_status" = "running" ] && [ "$alloy_restarts" = "$previous_restarts" ]; then
+                alloy_stable_checks=$((alloy_stable_checks + 1))
+              else
+                alloy_stable_checks=0
+              fi
+              if [ "$alloy_stable_checks" -ge 3 ]; then
+                echo "ML-owned Alloy is stable after restart."
+                break
+              fi
+              previous_restarts=$alloy_restarts
+              sleep 2
+            done
+            if [ "$alloy_stable_checks" -lt 3 ]; then
+              echo "ML-owned Alloy failed to remain running after configuration reload." >&2
+              docker compose -f docker-compose.prod.yml ps alloy >&2
+              docker compose -f docker-compose.prod.yml logs --tail=150 alloy >&2
+              exit 1
+            fi
+
             # Remove dangling images to prevent disk fill-up over time.
             docker image prune -f
 
