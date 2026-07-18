@@ -91,6 +91,7 @@ def test_alloy_uses_shared_drilldown_service_identity() -> None:
     assert 'listen_address = "127.0.0.1"' in config
     assert 'key       = "http.status_code"' in config
     assert 'key       = "http.response.status_code"' in config
+    assert '"__address__"  = "inference.sicurre.internal:8000"' in config
 
 
 def test_production_app_emits_candidate_traces_to_ml_alloy() -> None:
@@ -100,6 +101,7 @@ def test_production_app_emits_candidate_traces_to_ml_alloy() -> None:
     assert 'OTEL_EXPORTER_OTLP_ENDPOINT: "http://alloy:4317"' in app
     assert 'OTEL_EXPORTER_OTLP_INSECURE: "true"' in app
     assert 'OTEL_TRACE_SAMPLE_RATIO: "${OTEL_TRACE_SAMPLE_RATIO:-1.0}"' in app
+    assert "- inference.sicurre.internal" in app
     assert "GRAFANA_" not in app
 
 
