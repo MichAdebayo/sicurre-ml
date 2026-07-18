@@ -297,9 +297,18 @@ jobs:
               # production secrets into a second container.
               docker cp deploy/scripts/validate_deployment.py \
                 "$app_container:/tmp/validate_deployment.py"
-              docker exec --env INFERENCE_INTERNAL_URL=http://127.0.0.1:8000 --env DEPLOYMENT_MANIFEST_OUTPUT=/tmp/current-deployment.json "$app_container" /app/.venv/bin/python /tmp/validate_deployment.py
-              docker cp "$app_container:/tmp/current-deployment.json" \
-                deploy/current-deployment.json.tmp
+              if ! docker exec \
+                --env INFERENCE_INTERNAL_URL=http://127.0.0.1:8000 \
+                --env INFERENCE_VALIDATION_HOST=inference.sicurre.internal \
+                --env DEPLOYMENT_MANIFEST_OUTPUT=/tmp/current-deployment.json \
+                "$app_container" \
+                /app/.venv/bin/python /tmp/validate_deployment.py; then
+                return 1
+              fi
+              if ! docker cp "$app_container:/tmp/current-deployment.json" \
+                deploy/current-deployment.json.tmp; then
+                return 1
+              fi
               mv deploy/current-deployment.json.tmp deploy/current-deployment.json
             }
 
@@ -370,6 +379,7 @@ jobs:
             docker exec \
               --env OBSERVABILITY_PHASE=generate \
               --env OBSERVABILITY_APP_URL=http://127.0.0.1:8000 \
+              --env OBSERVABILITY_APP_HOST=inference.sicurre.internal \
               "$app_container" \
               /app/.venv/bin/python /tmp/validate_observability.py
 

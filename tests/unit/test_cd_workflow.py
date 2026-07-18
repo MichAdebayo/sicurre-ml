@@ -11,10 +11,13 @@ def test_deployment_validation_uses_running_app_environment() -> None:
 
     assert "docker exec" in validation_job
     assert "INFERENCE_INTERNAL_URL=http://127.0.0.1:8000" in validation_job
+    assert "INFERENCE_VALIDATION_HOST=inference.sicurre.internal" in validation_job
     assert "docker cp deploy/scripts/validate_deployment.py" in validation_job
     assert "--env-file .env" not in validation_job
     assert "deploy/current-deployment.json.tmp" in validation_job
     assert "/app/.venv/bin/python /tmp/validate_deployment.py" in validation_job
+    assert "if ! docker exec" in validation_job
+    assert "if ! docker cp" in validation_job
 
 
 def test_observability_validation_uses_container_local_endpoints() -> None:
@@ -26,6 +29,7 @@ def test_observability_validation_uses_container_local_endpoints() -> None:
     assert "docker run --rm" in observability_job
     assert "OBSERVABILITY_PHASE=generate" in observability_job
     assert "OBSERVABILITY_APP_URL=http://127.0.0.1:8000" in observability_job
+    assert "OBSERVABILITY_APP_HOST=inference.sicurre.internal" in observability_job
     assert "docker compose -f docker-compose.prod.yml ps -q alloy" in observability_job
     assert '--network "container:$alloy_container"' in observability_job
     assert "OBSERVABILITY_PHASE=delivery" in observability_job
