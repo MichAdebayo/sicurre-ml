@@ -10,6 +10,23 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 BASE_URL = os.getenv("INFERENCE_INTERNAL_URL", "http://app:8000").rstrip("/")
+VALIDATION_HOST = os.getenv("INFERENCE_VALIDATION_HOST", "inference.sicurre.internal").strip()
+
+
+def _decode_json_body(raw_body: bytes, *, status_code: int) -> dict[str, Any]:
+    if not raw_body:
+        return {}
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError:
+        if status_code >= 400:
+            # TrustedHostMiddleware and reverse proxies can return plain text.
+            # Keep diagnostics bounded and never echo an upstream body.
+            return {"error": "non_json_http_error"}
+        raise RuntimeError("Successful deployment response was not valid JSON") from None
+    if not isinstance(body, dict):
+        raise RuntimeError("Deployment response must be a JSON object")
+    return body
 
 
 def _request(
@@ -20,6 +37,8 @@ def _request(
     authenticated: bool = False,
 ) -> tuple[int, dict[str, Any], dict[str, str]]:
     headers = {"Content-Type": "application/json"}
+    if VALIDATION_HOST:
+        headers["Host"] = VALIDATION_HOST
     if authenticated:
         headers["Authorization"] = f"Bearer {os.environ['INFERENCE_API_KEY']}"
     request = Request(
@@ -30,13 +49,18 @@ def _request(
     )
     try:
         with urlopen(request, timeout=20) as response:  # noqa: S310
+            raw_body = response.read()
             return (
                 response.status,
-                json.loads(response.read() or b"{}"),
+                _decode_json_body(raw_body, status_code=response.status),
                 dict(response.headers.items()),
             )
     except HTTPError as exc:
-        return exc.code, json.loads(exc.read() or b"{}"), dict(exc.headers.items())
+        return (
+            exc.code,
+            _decode_json_body(exc.read(), status_code=exc.code),
+            dict(exc.headers.items()),
+        )
 
 
 def _wait_for(path: str, expected_status: int, attempts: int) -> dict[str, Any]:
