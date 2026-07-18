@@ -102,7 +102,7 @@ loki.write "grafana_cloud" {
 
 prometheus.scrape "sicurre_ml_app" {
 	targets = [{
-		"__address__"  = "app:8000",
+		"__address__"  = "inference.sicurre.internal:8000",
 		"service_name" = "sicurre-ml-inference",
 	}]
 	scrape_interval = "60s"
