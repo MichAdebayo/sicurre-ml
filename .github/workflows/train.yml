@@ -41,11 +41,8 @@ jobs:
   validate-dispatch:
     name: Validate receiver contract
     runs-on: ubuntu-latest
-    outputs:
-      training_dataset: ${{ steps.contract.outputs.training_dataset }}
     steps:
       - name: Validate trigger and dataset input
-        id: contract
         env:
           DISPATCH_DATASET: ${{ inputs.training_dataset }}
           FALLBACK_DATASET: ${{ secrets.KAGGLE_TRAINING_DATASET }}
@@ -64,7 +61,6 @@ jobs:
             echo "training_dataset must use owner/dataset-slug format." >&2
             exit 1
           fi
-          echo "training_dataset=$dataset" >> "$GITHUB_OUTPUT"
           {
             echo "## Dataset dispatch receiver"
             echo "| Field | Value |"
@@ -85,8 +81,28 @@ jobs:
     timeout-minutes: 120
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
+      # Resolve the dispatch input again in this job. Do not transport the slug
+      # through a job output: GitHub suppresses outputs whose values match a
+      # configured secret, which previously produced an empty Kaggle source.
+      KAGGLE_TRAINING_DATASET: ${{ inputs.training_dataset }}
 
     steps:
+      - name: Resolve production training dataset
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Production training must be dispatched from main." >&2
+            exit 1
+          fi
+          if [ -z "$KAGGLE_TRAINING_DATASET" ]; then
+            echo "training_dataset is required for production training." >&2
+            exit 1
+          fi
+          if ! printf '%s' "$KAGGLE_TRAINING_DATASET" | grep -Eq '^[A-Za-z0-9_-]+/[A-Za-z0-9_-]+$'; then
+            echo "training_dataset must use owner/dataset-slug format." >&2
+            exit 1
+          fi
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -130,7 +146,6 @@ jobs:
       # ── 2. Push notebook to Kaggle and trigger a new run ─────────────
       - name: Push notebook and trigger training run
         env:
-          KAGGLE_TRAINING_DATASET: ${{ needs.validate-dispatch.outputs.training_dataset }}
           DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
           DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
           DATABRICKS_EMAIL: ${{ secrets.DATABRICKS_EMAIL }}
@@ -243,7 +258,7 @@ jobs:
             echo "## Kaggle training result"
             echo "| Field | Value |"
             echo "|---|---|"
-            echo "| Dataset | \`${{ needs.validate-dispatch.outputs.training_dataset }}\` |"
+            echo "| Dataset | \`$KAGGLE_TRAINING_DATASET\` |"
             echo "| Source ref | \`${{ github.ref_name }}\` |"
             echo "| Source SHA | \`${{ github.sha }}\` |"
             echo "| Kaggle kernel | \`${{ env.KERNEL_SLUG }}\` |"
