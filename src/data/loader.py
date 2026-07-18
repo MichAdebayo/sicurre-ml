@@ -7,6 +7,11 @@ import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
 REQUIRED_COLUMNS = {"text", "label"}
+SPLIT_FILENAMES = {
+    "train": ("train.csv", "sicurre_train.csv"),
+    "val": ("val.csv", "sicurre_val.csv"),
+    "test": ("test.csv", "sicurre_test.csv"),
+}
 
 
 @dataclass(slots=True)
@@ -49,17 +54,31 @@ def _load_split(
     return validate_schema(frame, split_name, valid_labels)
 
 
+def _resolve_split_path(data_dir: Path, split_name: str) -> Path:
+    candidates = SPLIT_FILENAMES[split_name]
+    for filename in candidates:
+        path = data_dir / filename
+        if path.is_file():
+            return path
+
+    available = sorted(path.name for path in data_dir.glob("*.csv"))
+    available_text = ", ".join(available) if available else "none"
+    expected_text = ", ".join(candidates)
+    raise FileNotFoundError(
+        f"{split_name} split not found in {data_dir}; expected one of: "
+        f"{expected_text}. Available CSV files: {available_text}"
+    )
+
+
 def load_splits(
     data_dir: Path,
     label2id: dict[str, int],
     valid_labels: tuple[int, ...] = (0, 1, 2),
 ) -> DatasetSplits:
     return DatasetSplits(
-        train=_load_split(
-            data_dir / "sicurre_train.csv", "train", label2id, valid_labels
-        ),
-        val=_load_split(data_dir / "sicurre_val.csv", "val", label2id, valid_labels),
-        test=_load_split(data_dir / "sicurre_test.csv", "test", label2id, valid_labels),
+        train=_load_split(_resolve_split_path(data_dir, "train"), "train", label2id, valid_labels),
+        val=_load_split(_resolve_split_path(data_dir, "val"), "val", label2id, valid_labels),
+        test=_load_split(_resolve_split_path(data_dir, "test"), "test", label2id, valid_labels),
     )
 
 

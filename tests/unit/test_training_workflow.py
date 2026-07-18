@@ -33,3 +33,14 @@ def test_validate_only_never_starts_training_job() -> None:
     training_job = workflow.split("  sync-and-retrain:", maxsplit=1)[1]
 
     assert "inputs.validate_only != true" in training_job
+
+
+def test_training_checks_canonical_kaggle_splits_before_kernel_push() -> None:
+    workflow = _workflow()
+    training_job = workflow.split("  sync-and-retrain:", maxsplit=1)[1]
+    preflight_position = training_job.index("Validate Kaggle training dataset files")
+    kernel_push_position = training_job.index("kaggle kernels push")
+
+    assert preflight_position < kernel_push_position
+    assert 'kaggle datasets files "$KAGGLE_TRAINING_DATASET" -v' in training_job
+    assert "for expected_file in train.csv val.csv test.csv" in training_job
