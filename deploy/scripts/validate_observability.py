@@ -10,20 +10,28 @@ from urllib.request import Request, urlopen
 APP_URL = os.getenv("OBSERVABILITY_APP_URL", "http://127.0.0.1:8000").rstrip("/")
 ALLOY_URL = os.getenv("OBSERVABILITY_ALLOY_URL", "http://alloy:12345").rstrip("/")
 PHASE = os.getenv("OBSERVABILITY_PHASE", "all").strip().lower()
+APP_HOST = os.getenv("OBSERVABILITY_APP_HOST", "inference.sicurre.internal").strip()
 
 
-def _read(url: str) -> str:
-    with urlopen(url, timeout=15) as response:  # noqa: S310
+def _read(url: str, *, headers: dict[str, str] | None = None) -> str:
+    request = Request(url, headers=headers or {})
+    with urlopen(request, timeout=15) as response:  # noqa: S310
         if response.status != 200:
             raise RuntimeError(f"{url} returned HTTP {response.status}")
         return response.read().decode()
 
 
-def _read_with_retry(url: str, *, attempts: int = 12, delay_seconds: int = 5) -> str:
+def _read_with_retry(
+    url: str,
+    *,
+    attempts: int = 12,
+    delay_seconds: int = 5,
+    headers: dict[str, str] | None = None,
+) -> str:
     last_error: Exception | None = None
     for _ in range(attempts):
         try:
-            return _read(url)
+            return _read(url, headers=headers)
         except (OSError, RuntimeError, URLError) as exc:
             last_error = exc
             time.sleep(delay_seconds)
@@ -58,7 +66,8 @@ def _push_alloy_loki_smoke() -> None:
 
 
 def _generate_app_telemetry() -> None:
-    app_metrics = _read_with_retry(f"{APP_URL}/v1/metrics")
+    app_headers = {"Host": APP_HOST} if APP_HOST else {}
+    app_metrics = _read_with_retry(f"{APP_URL}/v1/metrics", headers=app_headers)
     if "sicurre_service_up 1" not in app_metrics:
         raise RuntimeError("Application telemetry endpoint is unhealthy")
 
@@ -73,6 +82,7 @@ def _generate_app_telemetry() -> None:
         headers={
             "Authorization": "Bearer observability-validation-invalid",
             "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+            **app_headers,
         },
     )
     try:
