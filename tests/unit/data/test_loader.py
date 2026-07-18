@@ -31,16 +31,41 @@ def test_validate_schema_rejects_invalid_label() -> None:
         validate_schema(frame, "train")
 
 
-def test_load_splits_reads_expected_csvs(tmp_path: Path) -> None:
+def test_load_splits_reads_canonical_csvs(tmp_path: Path) -> None:
     for split in ("train", "val", "test"):
         pd.DataFrame({"text": ["email"], "label": ["spam"]}).to_csv(
-            tmp_path / f"sicurre_{split}.csv",
+            tmp_path / f"{split}.csv",
             index=False,
         )
     splits = load_splits(tmp_path, {"phishing": 0, "spam": 1, "legitimate": 2})
     assert len(splits.train) == 1
     assert len(splits.val) == 1
     assert len(splits.test) == 1
+
+
+def test_load_splits_supports_legacy_prefixed_csvs(tmp_path: Path) -> None:
+    for split in ("train", "val", "test"):
+        pd.DataFrame({"text": ["email"], "label": ["spam"]}).to_csv(
+            tmp_path / f"sicurre_{split}.csv",
+            index=False,
+        )
+
+    splits = load_splits(tmp_path, {"phishing": 0, "spam": 1, "legitimate": 2})
+
+    assert len(splits.train) == 1
+    assert len(splits.val) == 1
+    assert len(splits.test) == 1
+
+
+def test_load_splits_reports_expected_and_available_files(tmp_path: Path) -> None:
+    (tmp_path / "unexpected.csv").write_text("text,label\nemail,spam\n", encoding="utf-8")
+
+    with pytest.raises(FileNotFoundError) as error:
+        load_splits(tmp_path, {"phishing": 0, "spam": 1, "legitimate": 2})
+
+    message = str(error.value)
+    assert "train.csv, sicurre_train.csv" in message
+    assert "Available CSV files: unexpected.csv" in message
 
 
 def test_summarize_split_returns_correct_structure() -> None:
@@ -50,4 +75,3 @@ def test_summarize_split_returns_correct_structure() -> None:
     distribution = cast(dict[str, int], result["distribution"])
     assert distribution["phishing"] == 2
     assert distribution["spam"] == 1
-
