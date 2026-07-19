@@ -16,6 +16,7 @@ def deployment_manifest() -> dict[str, Any]:
         },
         "model": {
             "version": os.getenv("MODEL_VERSION", "phishing-detector-1.0.0"),
+            "requested_revision": os.getenv("HF_MODEL_REVISION", "production"),
             "revision": get_model_version(),
         },
         "dataset": {
