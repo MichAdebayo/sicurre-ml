@@ -47,7 +47,6 @@ class TrainingConfig:
     phishing_boost: float = 2.0
     gamma: float = 1.5
     mlflow_model_name: str = "main.sicurre.phishing-detector"
-    promotion_tolerance: float = 0.0
 
 
 @dataclass(slots=True)
@@ -158,7 +157,6 @@ def create_training_config(device: str) -> TrainingConfig:
     return TrainingConfig(
         batch_size=16 if device == "cuda" else 8,
         use_fp16=device == "cuda",
-        promotion_tolerance=float(os.getenv("PROMOTION_TOLERANCE", "0.0")),
     )
 
 

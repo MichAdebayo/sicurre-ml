@@ -9,6 +9,18 @@ on:
         description: "Kaggle dataset slug for training data (overrides secret)"
         required: false
         default: ""
+      dataset_id:
+        description: "Canonical Sicurre/R2 frozen dataset identifier"
+        required: true
+        type: string
+      dataset_version:
+        description: "Immutable Sicurre frozen dataset version tag"
+        required: true
+        type: string
+      dataset_sha256:
+        description: "SHA-256 of the canonical frozen dataset manifest"
+        required: true
+        type: string
       validate_only:
         description: "Validate the receiver contract without starting Kaggle training"
         required: false
@@ -46,6 +58,9 @@ jobs:
         env:
           DISPATCH_DATASET: ${{ inputs.training_dataset }}
           FALLBACK_DATASET: ${{ secrets.KAGGLE_TRAINING_DATASET }}
+          DATASET_ID: ${{ inputs.dataset_id }}
+          DATASET_VERSION: ${{ inputs.dataset_version }}
+          DATASET_SHA256: ${{ inputs.dataset_sha256 }}
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -61,12 +76,23 @@ jobs:
             echo "training_dataset must use owner/dataset-slug format." >&2
             exit 1
           fi
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            test -n "$DATASET_ID" || { echo "dataset_id is required." >&2; exit 1; }
+            test -n "$DATASET_VERSION" || { echo "dataset_version is required." >&2; exit 1; }
+            if ! printf '%s' "$DATASET_SHA256" | grep -Eq '^[a-fA-F0-9]{64}$'; then
+              echo "dataset_sha256 must be exactly 64 hexadecimal characters." >&2
+              exit 1
+            fi
+          fi
           {
             echo "## Dataset dispatch receiver"
             echo "| Field | Value |"
             echo "|---|---|"
             echo "| Trigger | \`${{ github.event_name }}\` |"
             echo "| Dataset | \`$dataset\` |"
+            echo "| Dataset ID | \`${DATASET_ID:-not-supplied}\` |"
+            echo "| Dataset version | \`${DATASET_VERSION:-not-supplied}\` |"
+            echo "| Dataset SHA-256 | \`${DATASET_SHA256:-not-supplied}\` |"
             echo "| Source ref | \`${{ github.ref_name }}\` |"
             echo "| Source SHA | \`${{ github.sha }}\` |"
             echo "| Kaggle kernel | \`${{ env.KERNEL_SLUG }}\` |"
@@ -85,6 +111,12 @@ jobs:
       # through a job output: GitHub suppresses outputs whose values match a
       # configured secret, which previously produced an empty Kaggle source.
       KAGGLE_TRAINING_DATASET: ${{ inputs.training_dataset }}
+      TRAINING_DATASET_ID: ${{ inputs.dataset_id }}
+      TRAINING_DATASET_VERSION: ${{ inputs.dataset_version }}
+      TRAINING_DATASET_SHA256: ${{ inputs.dataset_sha256 }}
+      # Candidate identity is ML-owned and independent of the Sicurre dispatch.
+      # A reviewed promotion assigns the final semantic model version.
+      MODEL_SEMANTIC_VERSION: 0.0.0-candidate.${{ github.run_id }}
 
     steps:
       - name: Resolve production training dataset
@@ -102,6 +134,9 @@ jobs:
             echo "training_dataset must use owner/dataset-slug format." >&2
             exit 1
           fi
+          test -n "$TRAINING_DATASET_ID"
+          test -n "$TRAINING_DATASET_VERSION"
+          printf '%s' "$TRAINING_DATASET_SHA256" | grep -Eq '^[a-fA-F0-9]{64}$'
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -171,12 +206,16 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_USERNAME: ${{ secrets.HF_USERNAME }}
           REPO_NAME: ${{ secrets.REPO_NAME }}
-          PROMOTION_TOLERANCE: ${{ secrets.PROMOTION_TOLERANCE }}
+          TRAINING_DATASET_ID: ${{ inputs.dataset_id }}
+          TRAINING_DATASET_VERSION: ${{ inputs.dataset_version }}
+          TRAINING_DATASET_SHA256: ${{ inputs.dataset_sha256 }}
+          MODEL_SEMANTIC_VERSION: 0.0.0-candidate.${{ github.run_id }}
+          GITHUB_SOURCE_SHA: ${{ github.sha }}
         run: |
           STAGING=$(mktemp -d)
           cp ml/kaggle_training.ipynb "$STAGING/notebook.ipynb"
 
-          # Inject GitHub secrets as os.environ in a prepended notebook cell.
+          # Inject secrets and bounded lineage values as os.environ in a prepended cell.
           # UserSecretsClient only works in interactive (Kaggle UI) runs;
           # API-triggered (kaggle kernels push) runs cannot access it.
           cat > /tmp/inject_secrets.py << 'PYEOF'
@@ -185,7 +224,9 @@ jobs:
           KEYS = (
               "DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_EMAIL",
               "MLFLOW_EXPERIMENT_NAME", "HF_TOKEN", "HF_USERNAME", "REPO_NAME",
-              "PROMOTION_TOLERANCE",
+              "TRAINING_DATASET_ID", "TRAINING_DATASET_VERSION",
+              "TRAINING_DATASET_SHA256", "MODEL_SEMANTIC_VERSION",
+              "GITHUB_SOURCE_SHA", "GITHUB_RUN_ID",
           )
 
           path = sys.argv[1]
@@ -277,6 +318,10 @@ jobs:
             echo "| Field | Value |"
             echo "|---|---|"
             echo "| Dataset | \`$KAGGLE_TRAINING_DATASET\` |"
+            echo "| Dataset ID | \`$TRAINING_DATASET_ID\` |"
+            echo "| Dataset version | \`$TRAINING_DATASET_VERSION\` |"
+            echo "| Dataset SHA-256 | \`$TRAINING_DATASET_SHA256\` |"
+            echo "| Model semantic version | \`$MODEL_SEMANTIC_VERSION\` |"
             echo "| Source ref | \`${{ github.ref_name }}\` |"
             echo "| Source SHA | \`${{ github.sha }}\` |"
             echo "| Kaggle kernel | \`${{ env.KERNEL_SLUG }}\` |"

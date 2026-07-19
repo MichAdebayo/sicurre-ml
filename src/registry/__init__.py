@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -87,101 +88,47 @@ def register_model(
     return model_info
 
 
-def promote_if_threshold(
-    model_name: str,
-    test_metrics: dict[str, float],
-    recall_floor: float = 0.97,
-    f1_floor: float = 0.90,
-    tolerance: float = 0.0,
-) -> bool:
-    """Assign @production or @staging alias in MLflow registry. Returns True if promoted.
-
-    Promotion logic:
-    - If a @production model already exists, the new model must match or beat
-      its recall AND F1 minus ``tolerance``.  The floor thresholds still act as
-      a minimum safety net — a model that regresses below the floor is never
-      promoted even if the bar was already low.
-    - ``tolerance`` (default 0.0) allows a small metric drop caused by noise or
-      a larger, more varied dataset.  Set via the PROMOTION_TOLERANCE env var.
-    - If no @production model exists yet, the floor thresholds alone decide.
-    """
+def stage_candidate(model_name: str, model_version: str) -> None:
+    """Assign the MLflow candidate alias without changing production."""
     has_databricks = bool(
         os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
     )
     if not has_databricks:
-        print(
-            "[promote] Databricks credentials not found — skipping alias promotion."
-        )
-        return False
+        print("[registry] Databricks credentials not found — skipping candidate alias.")
+        return
 
+    import mlflow
     from mlflow import MlflowClient
 
+    mlflow.set_registry_uri("databricks-uc")
     client = MlflowClient()
-    versions = client.search_model_versions(f"name='{model_name}'")
-    latest_version = max(int(v.version) for v in versions)
+    client.set_registered_model_alias(model_name, "candidate", model_version)
+    print(f"[registry] MLflow candidate → {model_name} v{model_version}")
 
-    new_recall = test_metrics.get("test_phishing_recall", 0.0)
-    new_f1 = test_metrics.get("test_f1_weighted", 0.0)
 
-    # --- Compare against current production model if one exists ----------
-    prod_recall: float = recall_floor
-    prod_f1: float = f1_floor
-    has_production = False
+def promote_registered_model(
+    model_name: str,
+    model_version: str,
+    *,
+    approved: bool,
+) -> None:
+    """Move MLflow production only after an external reviewed gate passes."""
+    if not approved:
+        raise ValueError("Explicit approval is required for production promotion")
+    import mlflow
+    from mlflow import MlflowClient
 
-    try:
-        prod_mv = client.get_model_version_by_alias(model_name, "production")
-        if prod_mv.run_id is None:
-            raise ValueError("Production model version has no associated MLflow run")
-        prod_run = client.get_run(prod_mv.run_id)
-        prod_metrics = prod_run.data.metrics
-        fetched_recall = prod_metrics.get("test_phishing_recall")
-        fetched_f1 = prod_metrics.get("test_f1_weighted")
-        if fetched_recall is not None and fetched_f1 is not None:
-            # Use production score as the bar, but never drop below the floor
-            prod_recall = max(float(fetched_recall), recall_floor)
-            prod_f1 = max(float(fetched_f1), f1_floor)
-            has_production = True
-            print(
-                f"[promote] Production baseline — recall={fetched_recall:.4f}  "
-                f"f1={fetched_f1:.4f}  (effective bar: recall≥{prod_recall:.4f} f1≥{prod_f1:.4f})"
-            )
-    except Exception:
-        print(
-            f"[promote] No @production model found — using floor thresholds "
-            f"(recall≥{recall_floor:.2f} f1≥{f1_floor:.2f})"
-        )
-
-    promoted = new_recall >= prod_recall - tolerance and new_f1 >= prod_f1 - tolerance
-    if has_production and promoted:
-        beats_by = f"recall+{new_recall - float(prod_recall):.4f}  f1+{new_f1 - float(prod_f1):.4f}"
-        print(f"[promote] New model beats production — {beats_by}")
-    elif not promoted:
-        tol_note = f" (tolerance={tolerance:.4f})" if tolerance else ""
-        print(
-            f"[promote] New model did not beat bar{tol_note} — "
-            f"recall={new_recall:.4f} (need {prod_recall - tolerance:.4f})  "
-            f"f1={new_f1:.4f} (need {prod_f1 - tolerance:.4f})"
-        )
-
-    if promoted:
-        try:
-            client.delete_registered_model_alias(model_name, "production")
-        except Exception:
-            pass
-        client.set_registered_model_alias(model_name, "production", str(latest_version))
-    else:
-        client.set_registered_model_alias(model_name, "staging", str(latest_version))
-
-    return promoted
+    mlflow.set_registry_uri("databricks-uc")
+    client = MlflowClient()
+    client.set_registered_model_alias(model_name, "production", model_version)
+    print(f"[registry] MLflow production → {model_name} v{model_version}")
 
 
 def export_to_onnx(
     save_path: Path,
-    hf_repo_id: str,
-    hf_token: str,
     opset: int = 17,
 ) -> Path:
-    """Export the saved PyTorch model to ONNX via torch.onnx.export and push to HF Hub.
+    """Export the saved PyTorch model to ONNX before candidate publication.
 
     Uses torch directly — no optimum dependency — which avoids the
     transformers/optimum version incompatibility on Kaggle (optimum 1.x
@@ -190,7 +137,6 @@ def export_to_onnx(
     Returns the local path to the exported model.onnx (stored inside save_path).
     """
     import torch
-    from huggingface_hub import HfApi
     from transformers import AutoModelForSequenceClassification
 
     stable_path = save_path / "model.onnx"
@@ -233,34 +179,24 @@ def export_to_onnx(
         )
     print(f"[onnx-export] Written to {stable_path}")
 
-    api = HfApi()
-    api.upload_file(
-        path_or_fileobj=str(stable_path),
-        path_in_repo="model.onnx",
-        repo_id=hf_repo_id,
-        token=hf_token,
-        commit_message=f"Add model.onnx — torch.onnx export (opset {opset})",
-    )
-    print(f"[onnx-export] Pushed model.onnx → {hf_repo_id}")
     return stable_path
 
 
-def push_to_hub(
+@dataclass(frozen=True, slots=True)
+class HfPublication:
+    repo_url: str
+    revision: str
+
+
+def publish_candidate_to_hub(
     save_path: Path,
     hf_repo_id: str,
     hf_token: str,
     test_metrics: dict[str, float],
     mlflow_version: str | None = None,
     artifact_dir: Path | None = None,
-) -> str:
-    """Push model + tokenizer to HuggingFace Hub.
-
-    After pushing weights and artifacts, moves the ``production`` git tag to
-    the new commit so the app can always load ``revision="production"`` without
-    ever needing to track a commit SHA.
-
-    Returns the HF repo URL (``https://huggingface.co/{hf_repo_id}``).
-    """
+) -> HfPublication:
+    """Publish a complete candidate and return its immutable Hub revision."""
     from huggingface_hub import HfApi
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -289,16 +225,59 @@ def push_to_hub(
                     commit_message=f"Upload eval artifact: {artifact_name}",
                 )
 
-    # Move the `production` tag to the current HEAD of main.
-    # The app loads the model with revision="production" and never needs
-    # to track commit SHAs — this tag only advances on an explicit promotion.
+    onnx_path = save_path / "model.onnx"
+    if not onnx_path.exists():
+        raise FileNotFoundError("model.onnx must be exported before candidate publication")
+    api.upload_file(
+        path_or_fileobj=str(onnx_path),
+        path_in_repo="model.onnx",
+        repo_id=hf_repo_id,
+        token=hf_token,
+        commit_message="Upload candidate ONNX artifact",
+    )
+
+    revision = api.model_info(repo_id=hf_repo_id, revision="main", token=hf_token).sha
+    if not revision:
+        raise RuntimeError("Hugging Face did not return an immutable candidate revision")
+    print(f"[registry] HF candidate published → {hf_repo_id}@{revision}")
+    return HfPublication(
+        repo_url=f"https://huggingface.co/{hf_repo_id}",
+        revision=revision,
+    )
+
+
+def promote_hf_revision(
+    hf_repo_id: str,
+    hf_token: str,
+    revision: str,
+    *,
+    approved: bool,
+) -> str:
+    """Move and verify the HF production tag at an exact immutable revision."""
+    if not approved:
+        raise ValueError("Explicit approval is required for production promotion")
+    from huggingface_hub import HfApi
+
+    api = HfApi()
+    try:
+        api.delete_tag(repo_id=hf_repo_id, tag="production", token=hf_token)
+    except Exception as exc:
+        if "404" not in str(exc) and "not found" not in str(exc).lower():
+            raise
     api.create_tag(
         repo_id=hf_repo_id,
         tag="production",
-        revision="main",
+        revision=revision,
         token=hf_token,
-        exist_ok=True,  # overwrites the tag if it already exists
     )
-    print(f"[registry] HF tag 'production' → {hf_repo_id}@main")
-
-    return f"https://huggingface.co/{hf_repo_id}"
+    resolved = api.model_info(
+        repo_id=hf_repo_id,
+        revision="production",
+        token=hf_token,
+    ).sha
+    if resolved != revision:
+        raise RuntimeError(
+            f"HF production verification failed: expected {revision}, resolved {resolved}"
+        )
+    print(f"[registry] HF production → {hf_repo_id}@{revision}")
+    return resolved
