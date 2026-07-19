@@ -1,8 +1,7 @@
 """Stage 3 — ONNX CamemBERTa classifier.
 
-Loads model.onnx + tokenizer from the HuggingFace Hub on first call and
-caches them in memory. Re-checks the Hub commit SHA on startup so the
-container automatically picks up a newly promoted model after a restart.
+Loads model.onnx + tokenizer from an explicitly configured Hugging Face
+revision on first call and caches the resolved immutable commit in memory.
 """
 
 from __future__ import annotations
@@ -36,6 +35,10 @@ def _hf_repo_id() -> str:
     return f"{username}/{repo}"
 
 
+def _hf_model_revision() -> str:
+    return os.getenv("HF_MODEL_REVISION", "production")
+
+
 def _pull_from_hub() -> Path:
     """Download model.onnx + tokenizer from HF Hub into local cache.
 
@@ -45,12 +48,18 @@ def _pull_from_hub() -> Path:
     from huggingface_hub import HfApi, snapshot_download
 
     repo_id = _hf_repo_id()
+    requested_revision = _hf_model_revision()
     cache_dir = _model_cache_dir()
     sha_file = cache_dir / "sha.txt"
     hf_token = os.getenv("HF_TOKEN")
 
     api = HfApi()
-    info = api.repo_info(repo_id, repo_type="model", token=hf_token)
+    info = api.repo_info(
+        repo_id,
+        repo_type="model",
+        revision=requested_revision,
+        token=hf_token,
+    )
     remote_sha: str = info.sha or ""
 
     if sha_file.exists() and (cache_dir / "model.onnx").exists():
@@ -59,9 +68,17 @@ def _pull_from_hub() -> Path:
             print(f"[onnx] Cache up-to-date (sha={remote_sha[:8]}).")
             return cache_dir
 
-    print(f"[onnx] Downloading model from {repo_id} (sha={remote_sha[:8]})…")
+    if not remote_sha:
+        raise RuntimeError(
+            f"Hugging Face revision {requested_revision!r} did not resolve to a commit"
+        )
+    print(
+        f"[onnx] Downloading model from {repo_id}@{requested_revision} "
+        f"(sha={remote_sha[:8]})…"
+    )
     snapshot_download(
         repo_id=repo_id,
+        revision=remote_sha,
         local_dir=str(cache_dir),
         token=hf_token,
         ignore_patterns=["*.bin", "*.safetensors", "flax_model.*", "tf_model.*"],
