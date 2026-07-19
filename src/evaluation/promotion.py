@@ -10,7 +10,7 @@ GateResult = Literal["pass", "fail", "inconclusive"]
 class GoldenMetrics:
     weighted_f1: float
     phishing_recall: float
-    phishing_false_positive_rate: float
+    legitimate_false_positive_rate: float
     p95_latency_ms: float
 
 
@@ -18,8 +18,7 @@ class GoldenMetrics:
 class PromotionThresholds:
     f1_regression_tolerance: float = 0.0
     recall_regression_tolerance: float = 0.0
-    false_positive_rate_tolerance: float = 0.0
-    p95_latency_ceiling_ms: float = 1000.0
+    legitimate_false_positive_rate_tolerance: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,13 +58,11 @@ def decide_candidate_promotion(
         incumbent.phishing_recall - configured.recall_regression_tolerance
     ):
         reasons.append("phishing_recall_regressed")
-    if candidate.phishing_false_positive_rate > (
-        incumbent.phishing_false_positive_rate
-        + configured.false_positive_rate_tolerance
+    if candidate.legitimate_false_positive_rate > (
+        incumbent.legitimate_false_positive_rate
+        + configured.legitimate_false_positive_rate_tolerance
     ):
-        reasons.append("phishing_false_positive_rate_regressed")
-    if candidate.p95_latency_ms > configured.p95_latency_ceiling_ms:
-        reasons.append("p95_latency_ceiling_exceeded")
+        reasons.append("legitimate_false_positive_rate_regressed")
 
     return PromotionDecision(
         result="fail" if reasons else "pass",

@@ -4,6 +4,7 @@ import hashlib
 import json
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Literal
 
@@ -28,38 +29,66 @@ class GoldenSetReference:
 
 @dataclass(frozen=True, slots=True)
 class GoldenSample:
-    sample_id: str
+    id: str
     subject: str
     sender: str
     text: str
-    label: str
+    expected_label: str
     language: str
     scenario: str
     difficulty: str
     reviewer_rationale: str
+    reviewed_by: str
+    reviewed_at: str
 
     @classmethod
     def from_mapping(cls, value: dict[str, Any]) -> GoldenSample:
         expected = {
-            "sample_id",
+            "id",
             "subject",
             "sender",
             "text",
-            "label",
+            "expected_label",
             "language",
             "scenario",
             "difficulty",
             "reviewer_rationale",
+            "reviewed_by",
+            "reviewed_at",
         }
         if set(value) != expected:
             missing = sorted(expected - set(value))
             extra = sorted(set(value) - expected)
             raise ValueError(f"Invalid golden sample fields; missing={missing}, extra={extra}")
-        if value["label"] not in LABEL2ID:
-            raise ValueError(f"Unsupported golden sample label: {value['label']!r}")
+        if value["expected_label"] not in LABEL2ID:
+            raise ValueError(
+                f"Unsupported golden sample label: {value['expected_label']!r}"
+            )
         for field_name in expected:
-            if not isinstance(value[field_name], str) or not value[field_name].strip():
+            if not isinstance(value[field_name], str):
+                raise ValueError(f"Golden sample field {field_name!r} must be a string")
+        required_non_empty = expected - {"subject", "sender", "text"}
+        for field_name in required_non_empty:
+            if not value[field_name].strip():
                 raise ValueError(f"Golden sample field {field_name!r} must be non-empty")
+        if not any(value[field].strip() for field in ("subject", "sender", "text")):
+            raise ValueError("Golden sample must contain subject, sender, or text")
+        bounds = {"subject": 500, "sender": 200, "text": 5500}
+        for field_name, maximum in bounds.items():
+            if len(value[field_name]) > maximum:
+                raise ValueError(
+                    f"Golden sample field {field_name!r} exceeds {maximum} characters"
+                )
+        if value["language"] not in {"fr", "en"}:
+            raise ValueError(f"Unsupported golden sample language: {value['language']!r}")
+        try:
+            reviewed_at = datetime.fromisoformat(
+                value["reviewed_at"].replace("Z", "+00:00")
+            )
+        except ValueError as exc:
+            raise ValueError("Golden sample reviewed_at must be ISO-8601") from exc
+        if reviewed_at.tzinfo is None:
+            raise ValueError("Golden sample reviewed_at must include a timezone")
         return cls(**{key: value[key].strip() for key in expected})
 
     @property
@@ -80,7 +109,8 @@ class GoldenEvaluationReport:
     sample_count: int
     weighted_f1: float
     phishing_recall: float
-    phishing_false_positive_rate: float
+    legitimate_false_positive_count: int
+    legitimate_false_positive_rate: float
     p50_latency_ms: float
     p95_latency_ms: float
     p99_latency_ms: float
@@ -92,7 +122,8 @@ class GoldenEvaluationReport:
             "sample_count": self.sample_count,
             "weighted_f1": self.weighted_f1,
             "phishing_recall": self.phishing_recall,
-            "phishing_false_positive_rate": self.phishing_false_positive_rate,
+            "legitimate_false_positive_count": self.legitimate_false_positive_count,
+            "legitimate_false_positive_rate": self.legitimate_false_positive_rate,
             "p50_latency_ms": self.p50_latency_ms,
             "p95_latency_ms": self.p95_latency_ms,
             "p99_latency_ms": self.p99_latency_ms,
@@ -140,13 +171,26 @@ def load_approved_golden_set(
             if not isinstance(value, dict):
                 raise ValueError(f"Golden-set line {line_number} must be an object")
             sample = GoldenSample.from_mapping(value)
-            if sample.sample_id in seen_ids:
-                raise ValueError(f"Duplicate golden sample ID: {sample.sample_id}")
-            seen_ids.add(sample.sample_id)
+            if sample.id in seen_ids:
+                raise ValueError(f"Duplicate golden sample ID: {sample.id}")
+            seen_ids.add(sample.id)
             samples.append(sample)
 
     if not samples:
         raise ValueError("Golden set is empty")
+    if reference.schema_version == "1":
+        expected_counts = {"phishing": 25, "legitimate": 25, "spam": 10}
+        actual_counts = {
+            label: sum(sample.expected_label == label for sample in samples)
+            for label in expected_counts
+        }
+        if actual_counts != expected_counts:
+            raise ValueError(
+                f"Golden-set v1 class counts invalid: expected {expected_counts}, "
+                f"got {actual_counts}"
+            )
+        if any(sample.language != "fr" for sample in samples):
+            raise ValueError("Golden-set v1 must contain French examples only")
     return samples
 
 
@@ -157,7 +201,7 @@ def evaluate_golden_set(
     """Evaluate a model without retaining sample text in the report."""
     if not samples:
         raise ValueError("Golden set is empty")
-    expected = [sample.label for sample in samples]
+    expected = [sample.expected_label for sample in samples]
     predicted: list[str] = []
     latencies_ms: list[float] = []
     for sample in samples:
@@ -176,9 +220,9 @@ def evaluate_golden_set(
         output_dict=True,
         zero_division=0,
     )
-    non_phishing = sum(label != "phishing" for label in expected)
-    phishing_false_positives = sum(
-        actual != "phishing" and guess == "phishing"
+    legitimate_count = sum(label == "legitimate" for label in expected)
+    legitimate_false_positives = sum(
+        actual == "legitimate" and guess == "phishing"
         for actual, guess in zip(expected, predicted, strict=True)
     )
     per_class = {
@@ -200,8 +244,9 @@ def evaluate_golden_set(
                 zero_division=0,
             )
         ),
-        phishing_false_positive_rate=(
-            phishing_false_positives / non_phishing if non_phishing else 0.0
+        legitimate_false_positive_count=legitimate_false_positives,
+        legitimate_false_positive_rate=(
+            legitimate_false_positives / legitimate_count if legitimate_count else 0.0
         ),
         p50_latency_ms=float(np.percentile(latencies_ms, 50)),
         p95_latency_ms=float(np.percentile(latencies_ms, 95)),

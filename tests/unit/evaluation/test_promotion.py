@@ -11,7 +11,7 @@ def _metrics(**overrides: float) -> GoldenMetrics:
     values = {
         "weighted_f1": 0.95,
         "phishing_recall": 0.98,
-        "phishing_false_positive_rate": 0.01,
+        "legitimate_false_positive_rate": 0.01,
         "p95_latency_ms": 350.0,
     }
     values.update(overrides)
@@ -25,15 +25,24 @@ def test_pass_still_requires_manual_approval() -> None:
     assert decision.requires_manual_approval is True
 
 
-def test_rejects_recall_and_false_positive_regression() -> None:
+def test_rejects_recall_and_legitimate_false_positive_regression() -> None:
     decision = decide_candidate_promotion(
-        _metrics(phishing_recall=0.90, phishing_false_positive_rate=0.05),
+        _metrics(phishing_recall=0.90, legitimate_false_positive_rate=0.05),
         _metrics(),
     )
 
     assert decision.result == "fail"
     assert "phishing_recall_regressed" in decision.reasons
-    assert "phishing_false_positive_rate_regressed" in decision.reasons
+    assert "legitimate_false_positive_rate_regressed" in decision.reasons
+
+
+def test_latency_is_diagnostic_and_does_not_block() -> None:
+    decision = decide_candidate_promotion(
+        _metrics(p95_latency_ms=50_000),
+        _metrics(p95_latency_ms=100),
+    )
+
+    assert decision.result == "pass"
 
 
 def test_missing_incumbent_is_inconclusive() -> None:
