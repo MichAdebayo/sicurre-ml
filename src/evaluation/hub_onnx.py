@@ -63,3 +63,46 @@ class HubOnnxPredictor:
         }
         logits = self._session.run(None, inputs)[0][0]
         return self._id2label[int(np.argmax(logits))]
+
+
+class HubTransformersPredictor:
+    """PyTorch evaluator pinned to an immutable Hugging Face commit."""
+
+    def __init__(self, *, repo_id: str, revision: str, token: str | None) -> None:
+        import torch
+        from huggingface_hub import HfApi
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+        resolved = HfApi().model_info(
+            repo_id=repo_id,
+            revision=revision,
+            token=token,
+        ).sha
+        if not resolved or resolved != revision:
+            raise ValueError(
+                f"Model revision must be immutable: requested {revision}, resolved {resolved}"
+            )
+        self._torch = torch
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            repo_id, revision=revision, token=token
+        )
+        self._model = AutoModelForSequenceClassification.from_pretrained(
+            repo_id, revision=revision, token=token
+        )
+        self._model.eval()
+        self._id2label = {
+            int(key): str(value).lower()
+            for key, value in self._model.config.id2label.items()
+        }
+
+    def predict(self, text: str) -> str:
+        encoded = self._tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            max_length=256,
+            padding="max_length",
+        )
+        with self._torch.no_grad():
+            logits = self._model(**encoded).logits[0]
+        return self._id2label[int(self._torch.argmax(logits).item())]

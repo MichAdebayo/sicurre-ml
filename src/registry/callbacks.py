@@ -54,12 +54,18 @@ def post_provenance_callback(
         headers={
             "Authorization": f"Bearer {bearer_token}",
             "Content-Type": "application/json",
+            "User-Agent": "Sicurre-ML-Provenance/1.0",
         },
     )
 
     for attempt in range(max_attempts):
         try:
             with opener(request, timeout=15) as response:
+                content_type = response.headers.get("Content-Type", "")
+                if "application/json" not in content_type:
+                    raise RuntimeError(
+                        "Sicurre callback returned a non-JSON success response"
+                    )
                 result = json.loads(response.read())
                 return CallbackResponse(
                     id=str(result["id"]),

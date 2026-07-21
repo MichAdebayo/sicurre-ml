@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import os
 import tempfile
@@ -13,7 +14,7 @@ from src.evaluation.golden_set import (
     evaluate_golden_set,
     load_approved_golden_set,
 )
-from src.evaluation.hub_onnx import HubOnnxPredictor
+from src.evaluation.hub_onnx import HubTransformersPredictor
 from src.evaluation.promotion import GoldenMetrics, decide_candidate_promotion
 from src.evaluation.retrieval import download_r2_object
 from src.registry.callbacks import post_provenance_callback
@@ -97,20 +98,24 @@ def main() -> None:
                 review_status="approved",
             ),
         )
-        candidate = HubOnnxPredictor(
+        candidate = HubTransformersPredictor(
             repo_id=args.hf_repository,
             revision=args.candidate_hf_revision,
             token=hf_token,
-            cache_dir=root / "candidate",
         )
-        incumbent = HubOnnxPredictor(
+        candidate_report = evaluate_golden_set(samples, candidate.predict)
+        print("Candidate golden-set inference complete.")
+        del candidate
+        gc.collect()
+        incumbent = HubTransformersPredictor(
             repo_id=args.hf_repository,
             revision=args.incumbent_hf_revision,
             token=hf_token,
-            cache_dir=root / "incumbent",
         )
-        candidate_report = evaluate_golden_set(samples, candidate.predict)
         incumbent_report = evaluate_golden_set(samples, incumbent.predict)
+        print("Incumbent golden-set inference complete.")
+        del incumbent
+        gc.collect()
         decision = decide_candidate_promotion(
             _gate_metrics(candidate_report), _gate_metrics(incumbent_report)
         )

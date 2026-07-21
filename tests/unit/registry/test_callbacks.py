@@ -10,6 +10,8 @@ from src.registry.callbacks import post_provenance_callback
 
 
 class _Response:
+    headers = {"Content-Type": "application/json"}
+
     def __enter__(self) -> _Response:
         return self
 

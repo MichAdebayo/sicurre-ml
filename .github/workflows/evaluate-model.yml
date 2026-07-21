@@ -82,7 +82,7 @@ jobs:
 
       - name: Evaluate candidate and persist provenance
         run: |
-          uv run python .github/scripts/evaluate_candidate.py \
+          PYTHONPATH=. uv run python .github/scripts/evaluate_candidate.py \
             --candidate-mlflow-run-id '${{ inputs.candidate_mlflow_run_id }}' \
             --candidate-mlflow-model-version '${{ inputs.candidate_mlflow_model_version }}' \
             --candidate-hf-revision '${{ inputs.candidate_hf_revision }}' \
