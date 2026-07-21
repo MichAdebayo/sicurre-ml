@@ -18,3 +18,5 @@ def test_evaluation_workflow_uses_exact_object_and_secret_contract() -> None:
     assert "bc329213cacddab409a63deb9d663e593351b6e740a45cdada4c201e3beea346" in script
     assert "/internal/ml/candidates" in script
     assert "/internal/ml/evaluations" in script
+    assert "workflow_call:" in workflow
+    assert "default: production" in workflow

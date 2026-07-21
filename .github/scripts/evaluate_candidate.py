@@ -64,6 +64,15 @@ def main() -> None:
         secrets["SICURRE_INTERNAL_API_KEY"], "SICURRE_INTERNAL_API_KEY"
     )
     hf_token = secrets["HF_TOKEN"]
+    from huggingface_hub import HfApi
+
+    incumbent_revision = HfApi().model_info(
+        repo_id=args.hf_repository,
+        revision=args.incumbent_hf_revision,
+        token=hf_token,
+    ).sha
+    if not incumbent_revision:
+        raise RuntimeError("Incumbent revision did not resolve to an immutable SHA")
 
     with tempfile.TemporaryDirectory(prefix="sicurre-golden-") as temporary:
         root = Path(temporary)
@@ -109,7 +118,7 @@ def main() -> None:
         gc.collect()
         incumbent = HubTransformersPredictor(
             repo_id=args.hf_repository,
-            revision=args.incumbent_hf_revision,
+            revision=incumbent_revision,
             token=hf_token,
         )
         incumbent_report = evaluate_golden_set(samples, incumbent.predict)
@@ -161,7 +170,7 @@ def main() -> None:
                     "sicurre.golden_set.sha256": GOLDEN_SHA256,
                     "sicurre.candidate.run_id": args.candidate_mlflow_run_id,
                     "sicurre.candidate.hf_revision": args.candidate_hf_revision,
-                    "sicurre.incumbent.hf_revision": args.incumbent_hf_revision,
+                    "sicurre.incumbent.hf_revision": incumbent_revision,
                 }
             )
             evidence = {
@@ -200,7 +209,7 @@ def main() -> None:
             bearer_token=callback_token,
             payload={
                 "candidate_mlflow_run_id": args.candidate_mlflow_run_id,
-                "incumbent_huggingface_revision": args.incumbent_hf_revision,
+                "incumbent_huggingface_revision": incumbent_revision,
                 "evaluation_set_version_tag": GOLDEN_VERSION,
                 "evaluation_set_checksum": GOLDEN_SHA256,
                 "mlflow_evaluation_run_id": evaluation_run_id,

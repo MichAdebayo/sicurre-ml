@@ -1,6 +1,29 @@
 name: Evaluate model candidate
 
 on:
+  workflow_call:
+    inputs:
+      candidate_mlflow_run_id: {required: true, type: string}
+      candidate_mlflow_model_version: {required: true, type: string}
+      candidate_hf_revision: {required: true, type: string}
+      incumbent_hf_revision: {required: false, type: string, default: production}
+      hf_repository: {required: true, type: string}
+      semantic_version: {required: true, type: string}
+      service_source_revision: {required: true, type: string}
+      training_github_run_id: {required: true, type: string}
+      training_dataset_version: {required: true, type: string}
+    secrets:
+      R2_EVALUATION_ACCESS_KEY_ID: {required: true}
+      R2_EVALUATION_SECRET_ACCESS_KEY: {required: true}
+      R2_EVALUATION_ENDPOINT: {required: true}
+      R2_EVALUATION_BUCKET_NAME: {required: true}
+      SICURRE_CALLBACK_BASE_URL: {required: true}
+      SICURRE_INTERNAL_API_KEY: {required: true}
+      DATABRICKS_HOST: {required: true}
+      DATABRICKS_TOKEN: {required: true}
+      DATABRICKS_EMAIL: {required: true}
+      MLFLOW_EXPERIMENT_NAME: {required: true}
+      HF_TOKEN: {required: true}
   workflow_dispatch:
     inputs:
       candidate_mlflow_run_id:
@@ -13,8 +36,9 @@ on:
         description: "Immutable candidate Hugging Face commit SHA"
         required: true
       incumbent_hf_revision:
-        description: "Immutable incumbent Hugging Face commit SHA"
-        required: true
+        description: "Immutable incumbent SHA or production tag"
+        required: false
+        default: "production"
       hf_repository:
         description: "Hugging Face owner/repository"
         required: true
@@ -78,7 +102,7 @@ jobs:
             test -n "$value" || { echo "A required evaluation configuration is missing." >&2; exit 1; }
           done
           printf '%s' '${{ inputs.candidate_hf_revision }}' | grep -Eq '^[a-f0-9]{40}$'
-          printf '%s' '${{ inputs.incumbent_hf_revision }}' | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' '${{ inputs.incumbent_hf_revision }}' | grep -Eq '^(production|[a-f0-9]{40})$'
 
       - name: Evaluate candidate and persist provenance
         run: |
