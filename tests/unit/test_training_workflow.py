@@ -75,3 +75,14 @@ def test_notebook_publishes_candidate_without_automatic_production_move() -> Non
     assert "new_training_manifest" in source
     assert "promote_if_threshold" not in source
     assert "Promoted to @production" not in source
+
+
+def test_successful_training_automatically_calls_golden_evaluation() -> None:
+    workflow = _workflow()
+
+    assert "Download and validate candidate lineage manifest" in workflow
+    assert "training-manifest.json" in workflow
+    assert "evaluate-candidate:" in workflow
+    assert "uses: ./.github/workflows/evaluate-model.yml" in workflow
+    assert "needs.sync-and-retrain.result == 'success'" in workflow
+    assert "incumbent_hf_revision: production" in workflow

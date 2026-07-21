@@ -105,6 +105,15 @@ jobs:
     needs: validate-dispatch
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.validate_only != true }}
     timeout-minutes: 120
+    outputs:
+      candidate_mlflow_run_id: ${{ steps.lineage.outputs.candidate_mlflow_run_id }}
+      candidate_mlflow_model_version: ${{ steps.lineage.outputs.candidate_mlflow_model_version }}
+      candidate_hf_revision: ${{ steps.lineage.outputs.candidate_hf_revision }}
+      hf_repository: ${{ steps.lineage.outputs.hf_repository }}
+      semantic_version: ${{ steps.lineage.outputs.semantic_version }}
+      service_source_revision: ${{ steps.lineage.outputs.service_source_revision }}
+      training_github_run_id: ${{ steps.lineage.outputs.training_github_run_id }}
+      training_dataset_version: ${{ steps.lineage.outputs.training_dataset_version }}
     env:
       KAGGLE_API_TOKEN: ${{ secrets.KAGGLE_API_TOKEN }}
       # Resolve the dispatch input again in this job. Do not transport the slug
@@ -310,6 +319,39 @@ jobs:
           echo "Timed out after $((MAX_ATTEMPTS * SLEEP_SECS / 60)) minutes."
           exit 1
 
+      - name: Download and validate candidate lineage manifest
+        id: lineage
+        run: |
+          set -euo pipefail
+          output_dir=$(mktemp -d)
+          kaggle kernels output "${{ env.KERNEL_SLUG }}" -p "$output_dir"
+          manifest=$(find "$output_dir" -name training-manifest.json -print -quit)
+          test -n "$manifest" || { echo "Training output has no lineage manifest." >&2; exit 1; }
+          python3 - "$manifest" >> "$GITHUB_OUTPUT" <<'PYEOF'
+          import json
+          import re
+          import sys
+
+          payload = json.load(open(sys.argv[1], encoding="utf-8"))
+          model = payload["model"]
+          dataset = payload["training_dataset"]
+          values = {
+              "candidate_mlflow_run_id": model["mlflow_run_id"],
+              "candidate_mlflow_model_version": model["mlflow_model_version"],
+              "candidate_hf_revision": model["huggingface_revision"],
+              "hf_repository": model["huggingface_repo"],
+              "semantic_version": model["semantic_version"],
+              "service_source_revision": payload["source_revision"],
+              "training_github_run_id": payload["github_run_id"],
+              "training_dataset_version": dataset["version"],
+          }
+          for key, value in values.items():
+              text = str(value)
+              if not text or not re.fullmatch(r"[A-Za-z0-9._/+:-]+", text):
+                  raise SystemExit(f"Invalid candidate manifest value: {key}")
+              print(f"{key}={text}")
+          PYEOF
+
       - name: Record final training result
         if: always()
         run: |
@@ -327,3 +369,20 @@ jobs:
             echo "| Kaggle kernel | \`${{ env.KERNEL_SLUG }}\` |"
             echo "| Final result | **${{ job.status }}** |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  evaluate-candidate:
+    name: Evaluate immutable candidate
+    needs: sync-and-retrain
+    if: ${{ needs.sync-and-retrain.result == 'success' }}
+    uses: ./.github/workflows/evaluate-model.yml
+    with:
+      candidate_mlflow_run_id: ${{ needs.sync-and-retrain.outputs.candidate_mlflow_run_id }}
+      candidate_mlflow_model_version: ${{ needs.sync-and-retrain.outputs.candidate_mlflow_model_version }}
+      candidate_hf_revision: ${{ needs.sync-and-retrain.outputs.candidate_hf_revision }}
+      incumbent_hf_revision: production
+      hf_repository: ${{ needs.sync-and-retrain.outputs.hf_repository }}
+      semantic_version: ${{ needs.sync-and-retrain.outputs.semantic_version }}
+      service_source_revision: ${{ needs.sync-and-retrain.outputs.service_source_revision }}
+      training_github_run_id: ${{ needs.sync-and-retrain.outputs.training_github_run_id }}
+      training_dataset_version: ${{ needs.sync-and-retrain.outputs.training_dataset_version }}
+    secrets: inherit
