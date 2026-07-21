@@ -1,0 +1,118 @@
+name: Evaluate model candidate
+
+on:
+  workflow_call:
+    inputs:
+      candidate_mlflow_run_id: {required: true, type: string}
+      candidate_mlflow_model_version: {required: true, type: string}
+      candidate_hf_revision: {required: true, type: string}
+      incumbent_hf_revision: {required: false, type: string, default: production}
+      hf_repository: {required: true, type: string}
+      semantic_version: {required: true, type: string}
+      service_source_revision: {required: true, type: string}
+      training_github_run_id: {required: true, type: string}
+      training_dataset_version: {required: true, type: string}
+    secrets:
+      R2_EVALUATION_ACCESS_KEY_ID: {required: true}
+      R2_EVALUATION_SECRET_ACCESS_KEY: {required: true}
+      R2_EVALUATION_ENDPOINT: {required: true}
+      R2_EVALUATION_BUCKET_NAME: {required: true}
+      SICURRE_CALLBACK_BASE_URL: {required: true}
+      SICURRE_INTERNAL_API_KEY: {required: true}
+      DATABRICKS_HOST: {required: true}
+      DATABRICKS_TOKEN: {required: true}
+      DATABRICKS_EMAIL: {required: true}
+      MLFLOW_EXPERIMENT_NAME: {required: true}
+      HF_TOKEN: {required: true}
+  workflow_dispatch:
+    inputs:
+      candidate_mlflow_run_id:
+        description: "Candidate MLflow training run ID"
+        required: true
+      candidate_mlflow_model_version:
+        description: "Candidate registered MLflow model version"
+        required: true
+      candidate_hf_revision:
+        description: "Immutable candidate Hugging Face commit SHA"
+        required: true
+      incumbent_hf_revision:
+        description: "Immutable incumbent SHA or production tag"
+        required: false
+        default: "production"
+      hf_repository:
+        description: "Hugging Face owner/repository"
+        required: true
+      semantic_version:
+        description: "Candidate semantic version"
+        required: true
+      service_source_revision:
+        description: "Training source commit SHA"
+        required: true
+      training_github_run_id:
+        description: "Training GitHub Actions run ID"
+        required: true
+      training_dataset_version:
+        description: "Frozen Sicurre training dataset version tag"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-candidate-evaluation
+  cancel-in-progress: false
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      R2_EVALUATION_ACCESS_KEY_ID: ${{ secrets.R2_EVALUATION_ACCESS_KEY_ID }}
+      R2_EVALUATION_SECRET_ACCESS_KEY: ${{ secrets.R2_EVALUATION_SECRET_ACCESS_KEY }}
+      R2_EVALUATION_ENDPOINT: ${{ secrets.R2_EVALUATION_ENDPOINT }}
+      R2_EVALUATION_BUCKET_NAME: ${{ secrets.R2_EVALUATION_BUCKET_NAME }}
+      SICURRE_CALLBACK_BASE_URL: ${{ secrets.SICURRE_CALLBACK_BASE_URL }}
+      SICURRE_INTERNAL_API_KEY: ${{ secrets.SICURRE_INTERNAL_API_KEY }}
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      DATABRICKS_EMAIL: ${{ secrets.DATABRICKS_EMAIL }}
+      MLFLOW_EXPERIMENT_NAME: ${{ secrets.MLFLOW_EXPERIMENT_NAME }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install evaluation dependencies
+        run: uv sync --frozen --group ml --group mlops --group inference
+
+      - name: Validate immutable inputs and required configuration
+        run: |
+          set -euo pipefail
+          for value in \
+            "$R2_EVALUATION_ACCESS_KEY_ID" \
+            "$R2_EVALUATION_SECRET_ACCESS_KEY" \
+            "$R2_EVALUATION_ENDPOINT" \
+            "$R2_EVALUATION_BUCKET_NAME" \
+            "$SICURRE_CALLBACK_BASE_URL" \
+            "$SICURRE_INTERNAL_API_KEY"; do
+            test -n "$value" || { echo "A required evaluation configuration is missing." >&2; exit 1; }
+          done
+          printf '%s' '${{ inputs.candidate_hf_revision }}' | grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' '${{ inputs.incumbent_hf_revision }}' | grep -Eq '^(production|[a-f0-9]{40})$'
+
+      - name: Evaluate candidate and persist provenance
+        run: |
+          PYTHONPATH=. uv run python .github/scripts/evaluate_candidate.py \
+            --candidate-mlflow-run-id '${{ inputs.candidate_mlflow_run_id }}' \
+            --candidate-mlflow-model-version '${{ inputs.candidate_mlflow_model_version }}' \
+            --candidate-hf-revision '${{ inputs.candidate_hf_revision }}' \
+            --incumbent-hf-revision '${{ inputs.incumbent_hf_revision }}' \
+            --hf-repository '${{ inputs.hf_repository }}' \
+            --semantic-version '${{ inputs.semantic_version }}' \
+            --service-source-revision '${{ inputs.service_source_revision }}' \
+            --training-github-run-id '${{ inputs.training_github_run_id }}' \
+            --training-dataset-version '${{ inputs.training_dataset_version }}'
