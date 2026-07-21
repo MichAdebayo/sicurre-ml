@@ -33,7 +33,7 @@ def test_downloads_exact_object_and_verifies_checksum(monkeypatch, tmp_path: Pat
     result = download_r2_object(
         endpoint="https://account.r2.cloudflarestorage.com",
         bucket="sicurre-raw",
-        object_key="raw-snapshots/evaluation_sets/v1/golden.jsonl",
+        object_key="golden.jsonl",
         access_key_id="key",
         secret_access_key="secret",
         destination=destination,
@@ -56,7 +56,7 @@ def test_checksum_failure_removes_download(monkeypatch, tmp_path: Path) -> None:
         download_r2_object(
             endpoint="https://account.r2.cloudflarestorage.com",
             bucket="sicurre-raw",
-            object_key="raw-snapshots/evaluation_sets/v1/golden.jsonl",
+            object_key="golden.jsonl",
             access_key_id="key",
             secret_access_key="secret",
             destination=destination,

@@ -16,8 +16,8 @@ def download_r2_object(
     expected_sha256: str,
 ) -> Path:
     """Download one explicitly named R2 object and verify its immutable checksum."""
-    if not object_key.startswith("raw-snapshots/evaluation_sets/"):
-        raise ValueError("R2 evaluation object must use the evaluation_sets prefix")
+    if object_key != "golden.jsonl":
+        raise ValueError("R2 evaluation retrieval is restricted to golden.jsonl")
     import boto3
     from botocore.config import Config
 

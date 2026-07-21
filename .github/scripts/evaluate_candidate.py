@@ -20,7 +20,7 @@ from src.registry.callbacks import post_provenance_callback
 
 GOLDEN_VERSION = "golden-20260719-v1"
 GOLDEN_SHA256 = "bc329213cacddab409a63deb9d663e593351b6e740a45cdada4c201e3beea346"
-GOLDEN_KEY = f"raw-snapshots/evaluation_sets/{GOLDEN_VERSION}/golden.jsonl"
+GOLDEN_KEY = "golden.jsonl"
 
 
 def _required(value: str | None, name: str) -> str:
