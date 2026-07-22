@@ -44,6 +44,9 @@ services:
         aliases:
           - app
           - inference.sicurre.internal
+      sicurre-service-mesh:
+        aliases:
+          - inference.sicurre.internal
     logging:
       # Structured JSON logs are emitted to stdout and captured here.
       # Alloy tails these logs and ships them to Grafana Cloud Loki.
@@ -90,3 +93,6 @@ networks:
   sicurre-ml-internal:
     name: sicurre-ml-internal
     driver: bridge
+  sicurre-service-mesh:
+    external: true
+    name: sicurre-service-mesh
