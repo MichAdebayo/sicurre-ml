@@ -9,6 +9,7 @@ from src.registry.lineage import (
     mlflow_lineage_tags,
     new_training_manifest,
 )
+from src.registry.tags import model_version_tag_key
 
 
 def test_manifest_is_machine_readable_and_tags_are_bounded(tmp_path: Path) -> None:
@@ -34,3 +35,11 @@ def test_manifest_is_machine_readable_and_tags_are_bounded(tmp_path: Path) -> No
     assert payload["state"] == "candidate"
     assert tags["sicurre.dataset.version"] == "base-1"
     assert tags["sicurre.model.hf_revision"] == "b" * 40
+
+
+def test_unity_catalog_model_version_tag_keys_are_safe() -> None:
+    assert model_version_tag_key("sicurre.model.stage") == "sicurre_model_stage"
+    assert (
+        model_version_tag_key("sicurre.promotion.approved_by")
+        == "sicurre_promotion_approved_by"
+    )

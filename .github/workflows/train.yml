@@ -123,9 +123,9 @@ jobs:
       TRAINING_DATASET_ID: ${{ inputs.dataset_id }}
       TRAINING_DATASET_VERSION: ${{ inputs.dataset_version }}
       TRAINING_DATASET_SHA256: ${{ inputs.dataset_sha256 }}
-      # Candidate identity is ML-owned and independent of the Sicurre dispatch.
-      # A reviewed promotion assigns the final semantic model version.
-      MODEL_SEMANTIC_VERSION: 0.0.0-candidate.${{ github.run_id }}
+      # Candidate identity is ML-owned. Registration supplies the patch
+      # component, so candidate and promoted artifact keep one stable SemVer.
+      MODEL_VERSION_SERIES: "1.0"
 
     steps:
       - name: Resolve production training dataset
@@ -218,7 +218,7 @@ jobs:
           TRAINING_DATASET_ID: ${{ inputs.dataset_id }}
           TRAINING_DATASET_VERSION: ${{ inputs.dataset_version }}
           TRAINING_DATASET_SHA256: ${{ inputs.dataset_sha256 }}
-          MODEL_SEMANTIC_VERSION: 0.0.0-candidate.${{ github.run_id }}
+          MODEL_VERSION_SERIES: "1.0"
           GITHUB_SOURCE_SHA: ${{ github.sha }}
         run: |
           STAGING=$(mktemp -d)
@@ -234,7 +234,7 @@ jobs:
               "DATABRICKS_HOST", "DATABRICKS_TOKEN", "DATABRICKS_EMAIL",
               "MLFLOW_EXPERIMENT_NAME", "HF_TOKEN", "HF_USERNAME", "REPO_NAME",
               "TRAINING_DATASET_ID", "TRAINING_DATASET_VERSION",
-              "TRAINING_DATASET_SHA256", "MODEL_SEMANTIC_VERSION",
+              "TRAINING_DATASET_SHA256", "MODEL_VERSION_SERIES",
               "GITHUB_SOURCE_SHA", "GITHUB_RUN_ID",
           )
 
@@ -363,7 +363,7 @@ jobs:
             echo "| Dataset ID | \`$TRAINING_DATASET_ID\` |"
             echo "| Dataset version | \`$TRAINING_DATASET_VERSION\` |"
             echo "| Dataset SHA-256 | \`$TRAINING_DATASET_SHA256\` |"
-            echo "| Model semantic version | \`$MODEL_SEMANTIC_VERSION\` |"
+            echo "| Model version series | \`$MODEL_VERSION_SERIES\` |"
             echo "| Source ref | \`${{ github.ref_name }}\` |"
             echo "| Source SHA | \`${{ github.sha }}\` |"
             echo "| Kaggle kernel | \`${{ env.KERNEL_SLUG }}\` |"
@@ -385,4 +385,18 @@ jobs:
       service_source_revision: ${{ needs.sync-and-retrain.outputs.service_source_revision }}
       training_github_run_id: ${{ needs.sync-and-retrain.outputs.training_github_run_id }}
       training_dataset_version: ${{ needs.sync-and-retrain.outputs.training_dataset_version }}
+    secrets: inherit
+
+  promote-candidate:
+    name: Await review and promote passing candidate
+    needs: evaluate-candidate
+    if: ${{ needs.evaluate-candidate.outputs.outcome == 'passed' }}
+    uses: ./.github/workflows/promote-model.yml
+    with:
+      evaluation_run_id: ${{ needs.evaluate-candidate.outputs.evaluation_run_id }}
+      candidate_mlflow_run_id: ${{ needs.evaluate-candidate.outputs.candidate_mlflow_run_id }}
+      candidate_mlflow_model_version: ${{ needs.evaluate-candidate.outputs.candidate_mlflow_model_version }}
+      candidate_hf_revision: ${{ needs.evaluate-candidate.outputs.candidate_hf_revision }}
+      hf_repository: ${{ needs.evaluate-candidate.outputs.hf_repository }}
+      semantic_version: ${{ needs.evaluate-candidate.outputs.semantic_version }}
     secrets: inherit
