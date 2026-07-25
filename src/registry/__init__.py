@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from src.config.training_config import RuntimeState, TrainingConfig
+from src.registry.tags import model_version_tag_key
 
 
 def setup_mlflow(runtime_state: RuntimeState) -> str:
@@ -88,7 +89,13 @@ def register_model(
     return model_info
 
 
-def stage_candidate(model_name: str, model_version: str) -> None:
+def stage_candidate(
+    model_name: str,
+    model_version: str,
+    *,
+    semantic_version: str | None = None,
+    run_id: str | None = None,
+) -> None:
     """Assign the MLflow candidate alias without changing production."""
     has_databricks = bool(
         os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
@@ -103,7 +110,53 @@ def stage_candidate(model_name: str, model_version: str) -> None:
     mlflow.set_registry_uri("databricks-uc")
     client = MlflowClient()
     client.set_registered_model_alias(model_name, "candidate", model_version)
+    client.set_model_version_tag(
+        model_name,
+        model_version,
+        model_version_tag_key("sicurre.model.stage"),
+        "candidate",
+    )
+    if semantic_version:
+        client.set_model_version_tag(
+            model_name,
+            model_version,
+            model_version_tag_key("sicurre.model.semantic_version"),
+            semantic_version,
+        )
+    if run_id:
+        client.set_tag(run_id, "sicurre.model.stage", "candidate")
+        if semantic_version:
+            client.set_tag(
+                run_id, "sicurre.model.semantic_version", semantic_version
+            )
+            client.set_tag(
+                run_id,
+                "mlflow.runName",
+                f"model-{semantic_version}-candidate",
+            )
     print(f"[registry] MLflow candidate → {model_name} v{model_version}")
+
+
+def tag_registered_model_lineage(
+    model_name: str,
+    model_version: str,
+    run_id: str,
+    tags: dict[str, str],
+) -> None:
+    """Mirror bounded lineage tags onto the MLflow run and model version."""
+    import mlflow
+    from mlflow import MlflowClient
+
+    mlflow.set_registry_uri("databricks-uc")
+    client = MlflowClient()
+    for key, value in tags.items():
+        client.set_tag(run_id, key, value)
+        client.set_model_version_tag(
+            model_name,
+            model_version,
+            model_version_tag_key(key),
+            value,
+        )
 
 
 def promote_registered_model(

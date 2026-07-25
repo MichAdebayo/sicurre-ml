@@ -121,6 +121,27 @@ def main() -> None:
     manifest_status, manifest, _ = _request("/v1/manifest", authenticated=True)
     if manifest_status != 200 or manifest.get("schema_version") != 1:
         raise RuntimeError("Deployment manifest contract validation failed")
+    model_identity = manifest.get("model")
+    if not isinstance(model_identity, dict):
+        raise RuntimeError("Deployment manifest has no model identity")
+
+    expected_revision = os.getenv("EXPECTED_MODEL_REVISION")
+    if expected_revision:
+        if model_identity.get("requested_revision") != expected_revision:
+            raise RuntimeError("Runtime requested model revision does not match promotion")
+        if model_identity.get("revision") != expected_revision:
+            raise RuntimeError("Runtime immutable model revision does not match promotion")
+        response_revision = normalized_headers.get("x-sicurre-model-revision")
+        if response_revision != expected_revision:
+            raise RuntimeError("Inference model revision header does not match promotion")
+
+    expected_version = os.getenv("EXPECTED_MODEL_VERSION")
+    if expected_version:
+        if model_identity.get("version") != expected_version:
+            raise RuntimeError("Runtime semantic model version does not match promotion")
+        response_version = normalized_headers.get("x-sicurre-model-version")
+        if response_version != expected_version:
+            raise RuntimeError("Inference model version header does not match promotion")
 
     output_path = os.getenv("DEPLOYMENT_MANIFEST_OUTPUT")
     if output_path:
@@ -128,7 +149,10 @@ def main() -> None:
             json.dumps(manifest, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-    print("Deployment validation passed: health, readiness, auth, response, and identity.")
+    print(
+        "Deployment validation passed: health, readiness, auth, response, "
+        "and exact identity."
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,340 @@
+name: Promote approved model
+
+on:
+  workflow_call:
+    inputs:
+      evaluation_run_id: {required: true, type: string}
+      candidate_mlflow_run_id: {required: true, type: string}
+      candidate_mlflow_model_version: {required: true, type: string}
+      candidate_hf_revision: {required: true, type: string}
+      hf_repository: {required: true, type: string}
+      semantic_version: {required: true, type: string}
+    secrets:
+      DATABRICKS_HOST: {required: true}
+      DATABRICKS_TOKEN: {required: true}
+      HF_TOKEN: {required: true}
+      SICURRE_CALLBACK_BASE_URL: {required: true}
+      SICURRE_INTERNAL_API_KEY: {required: true}
+      HETZNER_HOST: {required: true}
+      HETZNER_USER: {required: true}
+      HETZNER_SSH_KEY: {required: true}
+      DEPLOY_PATH: {required: true}
+  workflow_dispatch:
+    inputs:
+      evaluation_run_id:
+        description: "Passing MLflow evaluation run ID"
+        required: true
+      candidate_mlflow_run_id:
+        description: "Candidate MLflow training run ID"
+        required: true
+      candidate_mlflow_model_version:
+        description: "Candidate registered MLflow version"
+        required: true
+      candidate_hf_revision:
+        description: "Immutable candidate Hugging Face SHA"
+        required: true
+      hf_repository:
+        description: "Hugging Face owner/repository"
+        required: true
+      semantic_version:
+        description: "Immutable semantic model version"
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-model-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Review, promote, deploy, and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      SICURRE_CALLBACK_BASE_URL: ${{ secrets.SICURRE_CALLBACK_BASE_URL }}
+      SICURRE_INTERNAL_API_KEY: ${{ secrets.SICURRE_INTERNAL_API_KEY }}
+      PROMOTION_STATE: /tmp/model-promotion-state.json
+      EVALUATION_RUN_ID: ${{ inputs.evaluation_run_id }}
+      CANDIDATE_MLFLOW_RUN_ID: ${{ inputs.candidate_mlflow_run_id }}
+      CANDIDATE_MLFLOW_MODEL_VERSION: ${{ inputs.candidate_mlflow_model_version }}
+      CANDIDATE_HF_REVISION: ${{ inputs.candidate_hf_revision }}
+      HF_REPOSITORY: ${{ inputs.hf_repository }}
+      SEMANTIC_VERSION: ${{ inputs.semantic_version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install promotion dependencies
+        run: uv sync --frozen --group mlops --group inference
+
+      - name: Validate immutable promotion inputs
+        run: |
+          set -euo pipefail
+          printf '%s' "$CANDIDATE_HF_REVISION" |
+            grep -Eq '^[a-f0-9]{40}$'
+          printf '%s' "$CANDIDATE_MLFLOW_RUN_ID" |
+            grep -Eq '^[a-f0-9]{32}$'
+          printf '%s' "$EVALUATION_RUN_ID" |
+            grep -Eq '^[a-f0-9]{32}$'
+          printf '%s' "$CANDIDATE_MLFLOW_MODEL_VERSION" |
+            grep -Eq '^[1-9][0-9]*$'
+          printf '%s' "$HF_REPOSITORY" |
+            grep -Eq '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'
+          printf '%s' "$SEMANTIC_VERSION" |
+            grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-+][0-9A-Za-z.-]+)?$'
+
+      - name: Resolve protected-environment approval identity
+        id: approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          approved_by=""
+          for attempt in 1 2 3 4 5 6; do
+            approved_by=$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/approvals" \
+              --jq '[.[] | select(.state == "approved")][-1].user.login // empty')
+            [ -n "$approved_by" ] && break
+            sleep 2
+          done
+          if [ -z "$approved_by" ]; then
+            echo "No protected-environment approval was recorded; refusing promotion." >&2
+            exit 1
+          fi
+          approved_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          echo "approved_by=$approved_by" >> "$GITHUB_OUTPUT"
+          echo "approved_at=$approved_at" >> "$GITHUB_OUTPUT"
+
+      - name: Verify evidence and move MLflow/Hugging Face pointers
+        id: pointers
+        env:
+          APPROVED_BY: ${{ steps.approval.outputs.approved_by }}
+          APPROVED_AT: ${{ steps.approval.outputs.approved_at }}
+        run: |
+          PYTHONPATH=. uv run python .github/scripts/promote_model.py promote \
+            --evaluation-run-id "$EVALUATION_RUN_ID" \
+            --candidate-mlflow-run-id "$CANDIDATE_MLFLOW_RUN_ID" \
+            --candidate-mlflow-model-version "$CANDIDATE_MLFLOW_MODEL_VERSION" \
+            --candidate-hf-revision "$CANDIDATE_HF_REVISION" \
+            --hf-repository "$HF_REPOSITORY" \
+            --semantic-version "$SEMANTIC_VERSION" \
+            --github-run-id "$GITHUB_RUN_ID" \
+            --approved-by "$APPROVED_BY" \
+            --approved-at "$APPROVED_AT" \
+            --state-path "$PROMOTION_STATE"
+
+      - name: Copy identity-aware validator to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          source: "deploy/scripts/validate_deployment.py"
+          target: ${{ secrets.DEPLOY_PATH }}
+          strip_components: 0
+
+      - name: Pin and validate immutable production model
+        id: deploy
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1
+        env:
+          PREVIOUS_HF_REVISION: ${{ steps.pointers.outputs.previous_hf_revision }}
+          PREVIOUS_SEMANTIC_VERSION: ${{ steps.pointers.outputs.previous_semantic_version }}
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 20m
+          envs: CANDIDATE_HF_REVISION,SEMANTIC_VERSION,PREVIOUS_HF_REVISION,PREVIOUS_SEMANTIC_VERSION
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            app_container=$(docker compose -f docker-compose.prod.yml ps -q app)
+            test -n "$app_container"
+
+            # Write the registry snapshot first. If the current-runtime query
+            # itself fails, rollback still has deterministic incumbent values.
+            printf '%s\n' "$PREVIOUS_HF_REVISION" \
+              > .previous-model-revision
+            printf '%s\n' "$PREVIOUS_SEMANTIC_VERSION" \
+              > .previous-model-version
+            chmod 600 .previous-model-revision .previous-model-version
+
+            previous_identity=$(docker exec \
+              --env INFERENCE_VALIDATION_HOST=inference.sicurre.internal \
+              "$app_container" /app/.venv/bin/python -c \
+              'import json,urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/v1/manifest",headers={"Authorization":"Bearer "+__import__("os").environ["INFERENCE_API_KEY"],"Host":__import__("os").environ["INFERENCE_VALIDATION_HOST"]}); m=json.load(urllib.request.urlopen(r,timeout=20)); print(m["model"]["revision"]+"\\t"+m["model"]["version"])')
+            previous_revision=${previous_identity%%$'\t'*}
+            previous_version=${previous_identity#*$'\t'}
+            printf '%s\n' "$previous_revision" > .previous-model-revision
+            printf '%s\n' "$previous_version" > .previous-model-version
+
+            set_env() {
+              key="$1"
+              value="$2"
+              if grep -q "^${key}=" .env 2>/dev/null; then
+                sed -i "s|^${key}=.*|${key}=${value}|" .env
+              else
+                printf '%s=%s\n' "$key" "$value" >> .env
+              fi
+            }
+            set_env HF_MODEL_REVISION "$CANDIDATE_HF_REVISION"
+            set_env MODEL_VERSION "$SEMANTIC_VERSION"
+
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate app
+            app_container=$(docker compose -f docker-compose.prod.yml ps -q app)
+            docker cp deploy/scripts/validate_deployment.py \
+              "$app_container:/tmp/validate_deployment.py"
+            docker exec \
+              --env INFERENCE_INTERNAL_URL=http://127.0.0.1:8000 \
+              --env INFERENCE_VALIDATION_HOST=inference.sicurre.internal \
+              --env EXPECTED_MODEL_REVISION="$CANDIDATE_HF_REVISION" \
+              --env EXPECTED_MODEL_VERSION="$SEMANTIC_VERSION" \
+              "$app_container" \
+              /app/.venv/bin/python /tmp/validate_deployment.py
+
+      - name: Record active deployment in Sicurre
+        id: active_callback
+        if: ${{ steps.deploy.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          APPROVED_BY: ${{ steps.approval.outputs.approved_by }}
+          APPROVED_AT: ${{ steps.approval.outputs.approved_at }}
+        run: |
+          PYTHONPATH=. uv run python .github/scripts/promote_model.py callback \
+            --status active \
+            --candidate-mlflow-run-id "$CANDIDATE_MLFLOW_RUN_ID" \
+            --evaluation-run-id "$EVALUATION_RUN_ID" \
+            --github-run-id "$GITHUB_RUN_ID" \
+            --approved-by "$APPROVED_BY" \
+            --approved-at "$APPROVED_AT" \
+            --deployed-revision "$CANDIDATE_HF_REVISION"
+
+      - name: Restore MLflow and Hugging Face pointers
+        id: rollback_pointers
+        if: >-
+          ${{
+            always() &&
+            steps.pointers.outcome == 'success' &&
+            (
+              steps.deploy.outcome != 'success' ||
+              steps.active_callback.outcome != 'success'
+            )
+          }}
+        continue-on-error: true
+        run: |
+          PYTHONPATH=. uv run python .github/scripts/promote_model.py rollback \
+            --hf-repository "$HF_REPOSITORY" \
+            --state-path "$PROMOTION_STATE"
+
+      - name: Restore and validate incumbent runtime
+        id: rollback_runtime
+        if: >-
+          ${{
+            always() &&
+            steps.pointers.outcome == 'success' &&
+            (
+              steps.deploy.outcome != 'success' ||
+              steps.active_callback.outcome != 'success'
+            )
+          }}
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            cd "${{ secrets.DEPLOY_PATH }}"
+            previous_revision=$(cat .previous-model-revision)
+            previous_version=$(cat .previous-model-version)
+            printf '%s' "$previous_revision" | grep -Eq '^[a-f0-9]{40}$'
+
+            set_env() {
+              key="$1"
+              value="$2"
+              if grep -q "^${key}=" .env 2>/dev/null; then
+                sed -i "s|^${key}=.*|${key}=${value}|" .env
+              else
+                printf '%s=%s\n' "$key" "$value" >> .env
+              fi
+            }
+            set_env HF_MODEL_REVISION "$previous_revision"
+            set_env MODEL_VERSION "$previous_version"
+            docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate app
+            app_container=$(docker compose -f docker-compose.prod.yml ps -q app)
+            docker cp deploy/scripts/validate_deployment.py \
+              "$app_container:/tmp/validate_deployment.py"
+            docker exec \
+              --env INFERENCE_INTERNAL_URL=http://127.0.0.1:8000 \
+              --env INFERENCE_VALIDATION_HOST=inference.sicurre.internal \
+              --env EXPECTED_MODEL_REVISION="$previous_revision" \
+              --env EXPECTED_MODEL_VERSION="$previous_version" \
+              "$app_container" \
+              /app/.venv/bin/python /tmp/validate_deployment.py
+
+      - name: Record rollback outcome in Sicurre
+        id: rollback_callback
+        if: >-
+          ${{
+            always() &&
+            steps.rollback_pointers.outcome == 'success' &&
+            steps.rollback_runtime.outcome == 'success'
+          }}
+        continue-on-error: true
+        env:
+          APPROVED_BY: ${{ steps.approval.outputs.approved_by }}
+          APPROVED_AT: ${{ steps.approval.outputs.approved_at }}
+          ROLLBACK_GITHUB_RUN_ID: ${{ github.run_id }}-rollback-${{ github.run_attempt }}
+        run: |
+          PYTHONPATH=. uv run python .github/scripts/promote_model.py callback \
+            --status rolled_back \
+            --candidate-mlflow-run-id "$CANDIDATE_MLFLOW_RUN_ID" \
+            --evaluation-run-id "$EVALUATION_RUN_ID" \
+            --github-run-id "$ROLLBACK_GITHUB_RUN_ID" \
+            --approved-by "$APPROVED_BY" \
+            --approved-at "$APPROVED_AT" \
+            --failure-reason 'Candidate activation failed; the validated incumbent was restored.'
+
+      - name: Fail after unsuccessful activation
+        if: >-
+          ${{
+            always() &&
+            steps.pointers.outcome == 'success' &&
+            (
+              steps.deploy.outcome != 'success' ||
+              steps.active_callback.outcome != 'success'
+            )
+          }}
+        run: |
+          echo "Model activation failed. Pointer rollback=${{ steps.rollback_pointers.outcome }}, runtime rollback=${{ steps.rollback_runtime.outcome }}, callback=${{ steps.rollback_callback.outcome }}." >&2
+          exit 1
+
+      - name: Write promotion summary
+        if: ${{ steps.active_callback.outcome == 'success' }}
+        run: |
+          {
+            echo "## Protected model promotion"
+            echo "| Identity | Value |"
+            echo "|---|---|"
+            echo "| Semantic version | \`${{ inputs.semantic_version }}\` |"
+            echo "| MLflow model version | \`${{ inputs.candidate_mlflow_model_version }}\` |"
+            echo "| MLflow evaluation | \`${{ inputs.evaluation_run_id }}\` |"
+            echo "| Hugging Face SHA | \`${{ inputs.candidate_hf_revision }}\` |"
+            echo "| Approved by | \`${{ steps.approval.outputs.approved_by }}\` |"
+            echo "| Runtime validation | **passed** |"
+            echo "| Sicurre callback | **active** |"
+          } >> "$GITHUB_STEP_SUMMARY"

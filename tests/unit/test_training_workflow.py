@@ -57,7 +57,8 @@ def test_dispatch_requires_immutable_dataset_lineage() -> None:
     ):
         assert field in workflow
     assert "dataset_sha256 must be exactly 64 hexadecimal characters" in workflow
-    assert "MODEL_SEMANTIC_VERSION: 0.0.0-candidate.${{ github.run_id }}" in workflow
+    assert 'MODEL_VERSION_SERIES: "1.0"' in workflow
+    assert "MODEL_SEMANTIC_VERSION" not in workflow
 
 
 def test_notebook_publishes_candidate_without_automatic_production_move() -> None:
@@ -72,6 +73,8 @@ def test_notebook_publishes_candidate_without_automatic_production_move() -> Non
 
     assert "stage_candidate" in source
     assert "publish_candidate_to_hub" in source
+    assert 'semantic_model_version = f"{model_version_series}.{model_version}"' in source
+    assert "tag_registered_model_lineage" in source
     assert "new_training_manifest" in source
     assert "promote_if_threshold" not in source
     assert "Promoted to @production" not in source
@@ -83,6 +86,9 @@ def test_successful_training_automatically_calls_golden_evaluation() -> None:
     assert "Download and validate candidate lineage manifest" in workflow
     assert "training-manifest.json" in workflow
     assert "evaluate-candidate:" in workflow
+    assert "promote-candidate:" in workflow
+    assert "needs.evaluate-candidate.outputs.outcome == 'passed'" in workflow
+    assert "uses: ./.github/workflows/promote-model.yml" in workflow
     assert "uses: ./.github/workflows/evaluate-model.yml" in workflow
     assert "needs.sync-and-retrain.result == 'success'" in workflow
     assert "incumbent_hf_revision: production" in workflow
