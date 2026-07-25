@@ -276,7 +276,7 @@ def main() -> None:
                     args.candidate_mlflow_model_version
                 ),
                 "candidate_hf_revision": args.candidate_hf_revision,
-                "hf_repository": args.hf_repository,
+                'hf_repository': args.hf_repository,
                 "semantic_version": args.semantic_version,
             }
         )

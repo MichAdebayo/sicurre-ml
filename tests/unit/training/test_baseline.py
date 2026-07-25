@@ -2,6 +2,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 from src.config.training_config import RuntimeState, TrainingConfig
 from src.training.baseline import build_run_config
@@ -36,12 +37,16 @@ def test_build_run_config_returns_expected_keys(tmp_path: Path) -> None:
     assert result["base_model"] == config.model_name
 
 
-def test_prepare_baseline_training_builds_setup(tmp_path: Path) -> None:
+def test_prepare_baseline_training_builds_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from src.data.tokenizer import TokenizedSplits
     from src.training.baseline import prepare_baseline_training
 
     config = TrainingConfig()
     runtime = _make_runtime(tmp_path)
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
 
     mock_dataset = MagicMock()
     mock_dataset.__len__ = MagicMock(return_value=10)
@@ -60,6 +65,6 @@ def test_prepare_baseline_training_builds_setup(tmp_path: Path) -> None:
             MockTrainer.return_value = MagicMock()
             setup = prepare_baseline_training(train_df, tokenized_splits, config, runtime)
 
-    assert setup.run_name == "candidate-training-20250530"
+    assert setup.run_name == "candidate-training-42"
     assert "baseline" in str(setup.output_dir)
     assert "phase" in setup.run_config
