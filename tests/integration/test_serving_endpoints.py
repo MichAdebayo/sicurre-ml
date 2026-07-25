@@ -84,6 +84,32 @@ def test_classify_auth_and_public_contract(monkeypatch) -> None:
     assert response.headers["X-Sicurre-Deployment-Revision"]
 
 
+def test_classify_accepts_worker_payload_boundaries(monkeypatch) -> None:
+    monkeypatch.setenv("INFERENCE_API_KEY", "test-key")
+    monkeypatch.setattr(
+        "src.inference.onnx_classifier._load_session_and_tokenizer",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        serving_app,
+        "run_pipeline",
+        lambda **kwargs: ClassificationResult(
+            verdict="safe",
+            label_verdict="legitimate",
+            composite_score=0.1,
+            is_phishing=False,
+        ),
+    )
+
+    response = TestClient(serving_app.app).post(
+        "/v1/classify",
+        headers={"Authorization": "Bearer test-key"},
+        json={"subject": "S" * 500, "text": "T" * 5500, "use_llm": False},
+    )
+
+    assert response.status_code == 200
+
+
 def test_rate_limit_returns_retry_after(monkeypatch) -> None:
     from src.serving.rate_limit import service_rate_limiter
 

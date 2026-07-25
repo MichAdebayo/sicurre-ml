@@ -20,3 +20,8 @@ def test_evaluation_workflow_uses_exact_object_and_secret_contract() -> None:
     assert "/internal/ml/evaluations" in script
     assert "workflow_call:" in workflow
     assert "default: production" in workflow
+    assert "evaluation_run_id:" in workflow
+    assert "outcome:" in workflow
+    assert "GITHUB_OUTPUT" in script
+    assert "sicurre.candidate.mlflow_model_version" in script
+    assert '"failed": "rejected"' in script
