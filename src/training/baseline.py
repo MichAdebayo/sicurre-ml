@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -62,7 +63,11 @@ def prepare_baseline_training(
     config: TrainingConfig,
     runtime: RuntimeState,
 ) -> BaselineSetup:
-    run_name = f"baseline-v{runtime.run_date}"
+    # The registry assigns the semantic model version only after registration.
+    # Use the immutable workflow identity during training, then rename the run
+    # to its semantic candidate identity after registration.
+    training_identity = os.getenv("GITHUB_RUN_ID", runtime.run_date)
+    run_name = f"candidate-training-{training_identity}"
     output_dir = runtime.output_dir / "baseline"
     output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -18,10 +18,12 @@ from src.evaluation.hub_onnx import HubTransformersPredictor
 from src.evaluation.promotion import GoldenMetrics, decide_candidate_promotion
 from src.evaluation.retrieval import download_r2_object
 from src.registry.callbacks import post_provenance_callback
+from src.registry.tags import model_version_tag_key
 
 GOLDEN_VERSION = "golden-20260719-v1"
 GOLDEN_SHA256 = "bc329213cacddab409a63deb9d663e593351b6e740a45cdada4c201e3beea346"
 GOLDEN_KEY = "golden.jsonl"
+REGISTERED_MODEL_NAME = "main.sicurre.phishing-detector"
 
 
 def _required(value: str | None, name: str) -> str:
@@ -51,6 +53,17 @@ def _gate_metrics(report: object) -> GoldenMetrics:
         legitimate_false_positive_rate=report.legitimate_false_positive_rate,  # type: ignore[attr-defined]
         p95_latency_ms=report.p95_latency_ms,  # type: ignore[attr-defined]
     )
+
+
+def _write_actions_outputs(values: dict[str, str]) -> None:
+    output_path = os.getenv("GITHUB_OUTPUT")
+    if not output_path:
+        return
+    with Path(output_path).open("a", encoding="utf-8") as output:
+        for key, value in values.items():
+            if "\n" in value or "\r" in value:
+                raise ValueError(f"GitHub output {key} contains a line break")
+            output.write(f"{key}={value}\n")
 
 
 def main() -> None:
@@ -138,6 +151,7 @@ def main() -> None:
             secrets["DATABRICKS_TOKEN"], "DATABRICKS_TOKEN"
         )
         mlflow.set_tracking_uri("databricks")
+        mlflow.set_registry_uri("databricks-uc")
         experiment = _required(
             secrets["MLFLOW_EXPERIMENT_NAME"], "MLFLOW_EXPERIMENT_NAME"
         )
@@ -169,8 +183,13 @@ def main() -> None:
                     "sicurre.golden_set.version": GOLDEN_VERSION,
                     "sicurre.golden_set.sha256": GOLDEN_SHA256,
                     "sicurre.candidate.run_id": args.candidate_mlflow_run_id,
+                    "sicurre.candidate.mlflow_model_version": (
+                        args.candidate_mlflow_model_version
+                    ),
                     "sicurre.candidate.hf_revision": args.candidate_hf_revision,
+                    "sicurre.candidate.hf_repository": args.hf_repository,
                     "sicurre.incumbent.hf_revision": incumbent_revision,
+                    "sicurre.model.semantic_version": args.semantic_version,
                 }
             )
             evidence = {
@@ -203,6 +222,32 @@ def main() -> None:
         outcome = {"pass": "passed", "fail": "failed"}.get(
             decision.result, "inconclusive"
         )
+        registry = mlflow.MlflowClient()
+        stage = {
+            "passed": "candidate",
+            "failed": "rejected",
+            "inconclusive": "inconclusive",
+        }[outcome]
+        candidate_tags = {
+            "sicurre.model.semantic_version": args.semantic_version,
+            "sicurre.model.stage": stage,
+            "sicurre.model.hf_revision": args.candidate_hf_revision,
+            "sicurre.evaluation.run_id": evaluation_run_id,
+            "sicurre.evaluation.outcome": outcome,
+        }
+        for key, value in candidate_tags.items():
+            registry.set_tag(args.candidate_mlflow_run_id, key, value)
+            registry.set_model_version_tag(
+                REGISTERED_MODEL_NAME,
+                args.candidate_mlflow_model_version,
+                model_version_tag_key(key),
+                value,
+            )
+        registry.set_tag(
+            args.candidate_mlflow_run_id,
+            "mlflow.runName",
+            f"model-{args.semantic_version}-{stage}",
+        )
         post_provenance_callback(
             base_url=callback_base,
             path="/internal/ml/evaluations",
@@ -221,6 +266,19 @@ def main() -> None:
                 },
                 "evaluated_at": evaluated_at,
             },
+        )
+        _write_actions_outputs(
+            {
+                "outcome": outcome,
+                "evaluation_run_id": evaluation_run_id,
+                "candidate_mlflow_run_id": args.candidate_mlflow_run_id,
+                "candidate_mlflow_model_version": (
+                    args.candidate_mlflow_model_version
+                ),
+                "candidate_hf_revision": args.candidate_hf_revision,
+                "hf_repository": args.hf_repository,
+                "semantic_version": args.semantic_version,
+            }
         )
         print(f"Evaluation completed: {outcome}; MLflow run {evaluation_run_id}")
 

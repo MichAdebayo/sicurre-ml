@@ -60,6 +60,6 @@ def test_prepare_baseline_training_builds_setup(tmp_path: Path) -> None:
             MockTrainer.return_value = MagicMock()
             setup = prepare_baseline_training(train_df, tokenized_splits, config, runtime)
 
-    assert "baseline-v" in setup.run_name
+    assert setup.run_name == "candidate-training-20250530"
     assert "baseline" in str(setup.output_dir)
     assert "phase" in setup.run_config
