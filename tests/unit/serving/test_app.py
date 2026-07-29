@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from src.inference.mail_context import MailContext
 from src.inference.pipeline import ClassificationResult
 from src.serving import app as serving_app
 
@@ -10,7 +11,7 @@ def test_classify_response_hides_internal_weight_fields(monkeypatch) -> None:
     def fake_ready() -> None:
         return None
 
-    captured: dict[str, str] = {}
+    captured: dict[str, object] = {}
 
     def fake_run_pipeline(
         *,
@@ -19,10 +20,12 @@ def test_classify_response_hides_internal_weight_fields(monkeypatch) -> None:
         sender: str | None,
         use_virustotal: bool,
         use_llm: bool,
+        mail_context: MailContext,
     ) -> ClassificationResult:
         captured["subject"] = subject or ""
         captured["sender"] = sender or ""
         captured["text"] = text
+        captured["mail_context"] = mail_context
         return ClassificationResult(
             verdict="safe",
             label_verdict="legitimate",
@@ -63,6 +66,12 @@ def test_classify_response_hides_internal_weight_fields(monkeypatch) -> None:
             "text": "Suspicious message",
             "use_virustotal": False,
             "use_llm": False,
+            "mail_context": {
+                "structured_forward": True,
+                "outer_sender_authenticated": True,
+                "mailing_list_headers": False,
+                "subscription_claimed": True,
+            },
         },
     )
 
@@ -73,6 +82,11 @@ def test_classify_response_hides_internal_weight_fields(monkeypatch) -> None:
         "subject": "Action immediate requise",
         "sender": "support@paypa1-security.com",
         "text": "Suspicious message",
+        "mail_context": MailContext(
+            structured_forward=True,
+            outer_sender_authenticated=True,
+            subscription_claimed=True,
+        ),
     }
 
     assert "stage_weights_configured" not in body

@@ -123,15 +123,17 @@ def check_url_rules(text: str) -> RuleResult:
 
     reasons: list[str] = []
     risk_score = 0
-    max_single = 0
-
-    def add(score: int, reason: str) -> None:
-        nonlocal risk_score, max_single
-        risk_score += score
-        max_single = max(max_single, score)
-        reasons.append(reason)
 
     for url in urls:
+        url_risk = 0
+        max_url_signal = 0
+
+        def add(score: int, reason: str) -> None:
+            nonlocal url_risk, max_url_signal
+            url_risk += score
+            max_url_signal = max(max_url_signal, score)
+            reasons.append(reason)
+
         try:
             parsed = urlparse(url)
             host = parsed.netloc.split(":")[0].lower()
@@ -216,8 +218,9 @@ def check_url_rules(text: str) -> RuleResult:
 
         except Exception:
             continue
+        risk_score = max(risk_score, url_risk, max_url_signal)
 
-    final_risk = max(risk_score, max_single)
+    final_risk = risk_score
     is_phishing = final_risk >= 30
     confidence = min(final_risk / 100.0, 0.99) if is_phishing else final_risk / 100.0
 
