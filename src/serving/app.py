@@ -11,7 +11,9 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import os
+from contextlib import asynccontextmanager
 from hmac import compare_digest
 from typing import Any
 
@@ -32,7 +34,9 @@ load_dotenv()
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
 
-from src.inference.onnx_classifier import get_model_version  # noqa: E402
+from src.inference import onnx_classifier  # noqa: E402
+from src.inference.llm_classifier import close_http_client  # noqa: E402
+from src.inference.phishtank_loader import get_phishtank_set  # noqa: E402
 from src.inference.pipeline import ClassificationResult, run_pipeline  # noqa: E402
 from src.serving.identity import deployment_manifest, response_identity_headers  # noqa: E402
 from src.serving.rate_limit import service_rate_limiter  # noqa: E402
@@ -45,10 +49,39 @@ from src.serving.telemetry import (  # noqa: E402
 
 _production = os.getenv("DEPLOYMENT_ENV", "development").lower() == "production"
 
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    """Prewarm expensive local dependencies before accepting inference traffic."""
+
+    model_result, blocklist_result = await asyncio.gather(
+        asyncio.to_thread(onnx_classifier._load_session_and_tokenizer),
+        asyncio.to_thread(get_phishtank_set),
+        return_exceptions=True,
+    )
+    model_ready = not isinstance(model_result, Exception)
+    runtime_telemetry.set_model_ready(model_ready)
+    if not model_ready:
+        emit_operational_log(
+            "startup_degraded",
+            category="model_not_ready",
+            status_code=503,
+        )
+    if isinstance(blocklist_result, Exception):
+        emit_operational_log(
+            "startup_degraded",
+            category="blocklist_not_ready",
+            status_code=503,
+        )
+    yield
+    close_http_client()
+
+
 app = FastAPI(
     title="Sicurre Inference API",
     description="Multi-stage phishing detection — rules + blocklist + ONNX + LLM",
     version="0.1.0",
+    lifespan=_lifespan,
     docs_url=None if _production else "/docs",
     redoc_url=None if _production else "/redoc",
     openapi_url=None if _production else "/openapi.json",
@@ -138,7 +171,7 @@ def _enforce_rate_limit() -> None:
 class ClassifyRequest(BaseModel):
     subject: str = Field(default="", max_length=500, description="Email subject")
     sender: str = Field(default="", max_length=320, description="Email sender address")
-    text: str = Field(..., min_length=1, max_length=5500, description="Email message body")
+    text: str = Field(..., min_length=1, max_length=10000, description="Email message body")
     use_virustotal: bool = Field(False, description="Enable VirusTotal enrichment (adds latency)")
     use_llm: bool = Field(True, description="Enable LLM stage")
 
@@ -154,12 +187,16 @@ class ClassifyResponse(BaseModel):
     stage_breakdown: dict[str, dict[str, Any]]
     explanation: str
     llm_provider: str
+    degraded_reasons: list[str]
+    input_format: str
 
 
 def _public_stage_breakdown(
     stage_breakdown: dict[str, dict[str, Any]],
 ) -> dict[str, dict[str, Any]]:
-    hidden_fields = {"applied_weight", "contribution"}
+    # URL-bearing diagnostic fields remain process-local so they cannot leak
+    # into app persistence or telemetry through this API response.
+    hidden_fields = {"applied_weight", "contribution", "detail", "reasons"}
     return {
         stage_name: {
             key: value
@@ -183,7 +220,7 @@ def health() -> dict[str, str]:
 @app.get("/v1/metrics", response_class=PlainTextResponse, tags=["ops"])
 def metrics() -> PlainTextResponse:
     return PlainTextResponse(
-        runtime_telemetry.to_prometheus(model_version=get_model_version()),
+        runtime_telemetry.to_prometheus(model_version=onnx_classifier.get_model_version()),
         media_type="text/plain; version=0.0.4",
     )
 
@@ -192,8 +229,8 @@ def metrics() -> PlainTextResponse:
 def ready() -> dict[str, Any]:
     """Checks that the ONNX model is loaded and the session is ready."""
     try:
-        from src.inference.onnx_classifier import _load_session_and_tokenizer
-        _load_session_and_tokenizer()
+        onnx_classifier._load_session_and_tokenizer()
+        get_phishtank_set()
         runtime_telemetry.set_model_ready(True)
         return {"status": "ready"}
     except Exception:
@@ -225,24 +262,22 @@ def classify(
     """Run the full phishing detection pipeline on the provided text."""
     import time
 
-    from src.inference.onnx_classifier import _load_session_and_tokenizer
-
     started_at = time.perf_counter()
     try:
-        _load_session_and_tokenizer()
+        onnx_classifier._load_session_and_tokenizer()
     except Exception:
         latency_ms = (time.perf_counter() - started_at) * 1000.0
         observe_classify_request(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             latency_ms=latency_ms,
-            model_version=get_model_version(),
+            model_version=onnx_classifier.get_model_version(),
             error_type="model_not_ready",
             mode="llm" if request.use_llm else "local",
         )
         emit_classify_request_log(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             latency_ms=latency_ms,
-            model_version=get_model_version(),
+            model_version=onnx_classifier.get_model_version(),
             error_type="model_not_ready",
         )
         raise HTTPException(
@@ -264,7 +299,7 @@ def classify(
         observe_classify_request(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             latency_ms=latency_ms,
-            model_version=get_model_version(),
+            model_version=onnx_classifier.get_model_version(),
             error_type="pipeline_unexpected",
             mode="llm" if request.use_llm else "local",
         )
@@ -288,7 +323,11 @@ def classify(
         stage_breakdown=_public_stage_breakdown(result.stage_breakdown),
         explanation=result.explanation,
         llm_provider=result.llm_provider,
+        degraded_reasons=result.degraded_reasons,
+        input_format=result.input_format,
     )
+    for reason in response.degraded_reasons:
+        runtime_telemetry.observe_degradation(reason)
 
     latency_ms = (time.perf_counter() - started_at) * 1000.0
     observe_classify_request(
@@ -299,7 +338,7 @@ def classify(
         label_distribution=response.label_distribution,
         stage_latencies_ms=result.stage_latencies_ms,
         llm_provider=response.llm_provider,
-        model_version=get_model_version(),
+        model_version=onnx_classifier.get_model_version(),
         mode="llm" if request.use_llm else "local",
     )
     emit_classify_request_log(
@@ -310,7 +349,7 @@ def classify(
         label_distribution=response.label_distribution,
         stage_latencies_ms=result.stage_latencies_ms,
         llm_provider=response.llm_provider,
-        model_version=get_model_version(),
+        model_version=onnx_classifier.get_model_version(),
     )
     for header, value in response_identity_headers().items():
         http_response.headers[header] = value

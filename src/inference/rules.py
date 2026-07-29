@@ -15,6 +15,12 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     _tldextract = None  # type: ignore[assignment]
 
+_extractor = (
+    _tldextract.TLDExtract(suffix_list_urls=())
+    if _tldextract is not None
+    else None
+)
+
 
 # ---------------------------------------------------------------------------
 # French & international brand homograph targets
@@ -99,9 +105,9 @@ class RuleResult:
 
 def _extract(url: str) -> tuple[str, str, str] | None:
     """Return (subdomain, domain, suffix) or None if tldextract unavailable."""
-    if _tldextract is None:
+    if _extractor is None:
         return None
-    ext = _tldextract.extract(url)
+    ext = _extractor(url)
     return ext.subdomain, ext.domain, ext.suffix
 
 
@@ -140,10 +146,12 @@ def check_url_rules(text: str) -> RuleResult:
                 suffix = suffix.lower()
                 full_domain = f"{subdomain}.{domain_part}.{suffix}".lstrip(".")
 
-                # Whitelist: skip further checks for trusted FR public domains
-                for trusted in FRENCH_WHITELIST_SUFFIXES:
-                    if full_domain == trusted or full_domain.endswith("." + trusted):
-                        continue
+                # Whitelist: skip all heuristic checks for trusted FR domains.
+                if any(
+                    full_domain == trusted or full_domain.endswith("." + trusted)
+                    for trusted in FRENCH_WHITELIST_SUFFIXES
+                ):
+                    continue
 
                 # Rule 1: IP address URL (CRITICAL)
                 if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", host):

@@ -83,10 +83,11 @@ def test_pipeline_forwards_sender_and_subject_to_llm(monkeypatch) -> None:
         captured["sender"] = sender
         captured["subject"] = subject
         return LLMResult(
-            label="safe",
+            label="legitimate",
             confidence=0.9,
             explanation="No obvious phishing indicators.",
             provider="groq",
+            probabilities={"phishing": 0.02, "spam": 0.08, "legitimate": 0.9},
         )
 
     monkeypatch.setattr("src.inference.pipeline.classify_llm", fake_llm)
@@ -98,5 +99,76 @@ def test_pipeline_forwards_sender_and_subject_to_llm(monkeypatch) -> None:
         use_llm=True,
     )
 
-    assert captured["sender"] == "support@paypa1-security.com"
+    assert captured["sender"] == "paypa1-security.com"
     assert captured["subject"] == "Action immediate requise"
+
+
+def test_llm_can_correct_local_spam_to_legitimate(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.inference.pipeline.check_url_rules",
+        lambda text: RuleResult(is_phishing=False, confidence=0.0, reasons=[]),
+    )
+    monkeypatch.setattr(
+        "src.inference.pipeline.check_blocklists",
+        lambda text, use_virustotal=False: BlocklistResult(
+            is_known_phishing=False,
+            confidence=0.0,
+            source="clean",
+        ),
+    )
+    monkeypatch.setattr(
+        "src.inference.pipeline.classify_onnx",
+        lambda text: OnnxResult(
+            label="spam",
+            confidence=0.8,
+            raw_scores={"phishing": 0.05, "spam": 0.8, "legitimate": 0.15},
+        ),
+    )
+    monkeypatch.setattr(
+        "src.inference.pipeline.classify_llm",
+        lambda text, sender=None, subject=None: LLMResult(
+            label="legitimate",
+            confidence=0.95,
+            explanation="Message attendu et cohérent.",
+            provider="mistral",
+            probabilities={"phishing": 0.01, "spam": 0.04, "legitimate": 0.95},
+        ),
+    )
+
+    result = run_pipeline("Confirmation de votre inscription.", use_llm=True)
+
+    assert result.verdict == "safe"
+    assert result.label_verdict == "legitimate"
+    assert result.label_distribution["legitimate"] > result.label_distribution["spam"]
+
+
+def test_missing_llm_is_explicitly_degraded(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "src.inference.pipeline.check_url_rules",
+        lambda text: RuleResult(is_phishing=False, confidence=0.0, reasons=[]),
+    )
+    monkeypatch.setattr(
+        "src.inference.pipeline.check_blocklists",
+        lambda text, use_virustotal=False: BlocklistResult(
+            is_known_phishing=False,
+            confidence=0.0,
+            source="clean",
+        ),
+    )
+    monkeypatch.setattr(
+        "src.inference.pipeline.classify_onnx",
+        lambda text: OnnxResult(
+            label="legitimate",
+            confidence=0.9,
+            raw_scores={"phishing": 0.02, "spam": 0.08, "legitimate": 0.9},
+        ),
+    )
+    monkeypatch.setattr(
+        "src.inference.pipeline.classify_llm",
+        lambda text, sender=None, subject=None: None,
+    )
+
+    result = run_pipeline("Message attendu.", use_llm=True)
+
+    assert result.degraded_reasons == ["llm_unavailable"]
+    assert result.stage_breakdown["llm"]["active"] is False
