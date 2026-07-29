@@ -18,6 +18,9 @@ def test_deployment_validation_uses_running_app_environment() -> None:
     assert "/app/.venv/bin/python /tmp/validate_deployment.py" in validation_job
     assert "if ! docker exec" in validation_job
     assert "if ! docker cp" in validation_job
+    assert '--env EXPECTED_MODEL_REVISION="$expected_model_revision"' in validation_job
+    assert '--env EXPECTED_MODEL_VERSION="$expected_model_version"' in validation_job
+    assert "Cannot validate an unpinned model revision." in validation_job
 
 
 def test_observability_validation_uses_container_local_endpoints() -> None:
@@ -49,6 +52,8 @@ def test_cd_force_recreates_alloy_after_config_sync() -> None:
     assert "must be an HTTPS Loki push endpoint" in workflow
     assert "GRAFANA_PROMETHEUS_WRITE_API_TOKEN" in workflow
     assert "deploy/env.alloy is missing a non-empty ${required_var}" in workflow
+    assert "HF_MODEL_REVISION must be an immutable 40-character lowercase HF commit" in workflow
+    assert "MISTRAL_MODEL must use a pinned provider model ID" in workflow
 
 
 def test_ci_starts_pinned_alloy_runtime_graph() -> None:

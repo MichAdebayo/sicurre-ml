@@ -29,6 +29,7 @@ class RuntimeTelemetry:
     verdict_total: Counter[str] = field(default_factory=Counter)
     label_total: Counter[str] = field(default_factory=Counter)
     llm_provider_total: Counter[str] = field(default_factory=Counter)
+    degradation_total: Counter[str] = field(default_factory=Counter)
     error_total: Counter[str] = field(default_factory=Counter)
     auth_failure_total: int = 0
     rate_limit_total: int = 0
@@ -170,6 +171,10 @@ class RuntimeTelemetry:
                 f'sicurre_inference_error_total{{error_type="{error_type}"}} {count}'
                 for error_type, count in sorted(self.error_total.items())
             ]
+            degradation_lines = [
+                f'sicurre_inference_degradation_total{{reason="{reason}"}} {count}'
+                for reason, count in sorted(self.degradation_total.items())
+            ]
 
             model_version = model_version or _env_text(
                 "MODEL_SHA", _env_text("ONNX_MODEL_SHA", "unknown")
@@ -231,6 +236,10 @@ class RuntimeTelemetry:
                 '# HELP sicurre_inference_error_total Runtime error counts.',
                 '# TYPE sicurre_inference_error_total counter',
                 *error_lines,
+                '# HELP sicurre_inference_degradation_total '
+                'Successful requests with reduced decision quality.',
+                '# TYPE sicurre_inference_degradation_total counter',
+                *degradation_lines,
                 '# HELP sicurre_inference_model_info Model identity exposed as a gauge.',
                 '# TYPE sicurre_inference_model_info gauge',
                 f'sicurre_inference_model_info{{version="{model_version}"}} 1',
@@ -241,6 +250,11 @@ class RuntimeTelemetry:
     def observe_auth_failure(self) -> None:
         with self.lock:
             self.auth_failure_total += 1
+
+    def observe_degradation(self, reason: str) -> None:
+        bounded = reason if reason in {"llm_unavailable"} else "other"
+        with self.lock:
+            self.degradation_total[bounded] += 1
 
     def observe_rate_limit(self) -> None:
         with self.lock:

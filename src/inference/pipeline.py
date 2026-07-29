@@ -1,33 +1,39 @@
-"""Composite inference pipeline — orchestrates all four stages.
+"""Composite inference pipeline with three-class semantic fusion.
 
-Stage weights (configurable via env):
-    WEIGHT_RULES      default 0.10
-  WEIGHT_BLOCKLIST  default 0.25
-    WEIGHT_ONNX       default 0.20
-    WEIGHT_LLM        default 0.45
-
-A stage that produces no signal (e.g. no URLs for rules, LLM failure) has
-its weight redistributed proportionally to the stages that did run.
+The local ONNX model and external LLM are semantic classifiers. URL rules and
+blocklists are independent phishing evidence and can raise phishing risk
+without inventing a spam-versus-legitimate opinion.
 """
 
 from __future__ import annotations
 
+import math
 import os
 import time
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any
 
 from src.inference.blocklist import BlocklistResult, check_blocklists
+from src.inference.input_normalizer import CanonicalEmail, canonicalize_email
 from src.inference.llm_classifier import LLMResult, classify_llm
 from src.inference.onnx_classifier import OnnxResult, classify_onnx
 from src.inference.rules import RuleResult, check_url_rules
 
+_LABELS = ("phishing", "spam", "legitimate")
+_DEFAULT_RULE_WEIGHT = 0.10
+_DEFAULT_BLOCKLIST_WEIGHT = 0.25
+_SEMANTIC_EXECUTOR = ThreadPoolExecutor(
+    max_workers=2,
+    thread_name_prefix="sicurre-semantic",
+)
+
 
 @dataclass
 class ClassificationResult:
-    verdict: str                        # "phishing" | "safe"
-    label_verdict: str                  # "phishing" | "spam" | "legitimate"
-    composite_score: float              # 0.0–1.0  (phishing probability)
+    verdict: str
+    label_verdict: str
+    composite_score: float
     is_phishing: bool
     stage_latencies_ms: dict[str, float] = field(default_factory=dict)
     stage_scores: dict[str, float] = field(default_factory=dict)
@@ -39,54 +45,146 @@ class ClassificationResult:
     stage_breakdown: dict[str, dict[str, Any]] = field(default_factory=dict)
     explanation: str = ""
     llm_provider: str = ""
+    degraded_reasons: list[str] = field(default_factory=list)
+    input_format: str = "plain"
+
+
+def close_pipeline_resources() -> None:
+    """Release shared inference worker threads during process shutdown."""
+
+    _SEMANTIC_EXECUTOR.shutdown(wait=False, cancel_futures=True)
 
 
 def _env_float(name: str, default: float) -> float:
     try:
-        return float(os.getenv(name, str(default)))
+        value = float(os.getenv(name, str(default)))
+        return value if math.isfinite(value) and value >= 0.0 else default
     except ValueError:
         return default
 
 
-def _phishing_score(label: str, confidence: float) -> float:
-    """Convert a label + confidence to a phishing probability in [0, 1]."""
-    return confidence if label == "phishing" else 1.0 - confidence
-
-
-def _onnx_phishing_score(result: OnnxResult) -> float:
-    """Map the 3-class ONNX output to a binary phishing probability."""
-    phishing_prob = result.raw_scores.get("phishing")
-    if phishing_prob is not None:
-        return float(phishing_prob)
-    return _phishing_score(result.label, result.confidence)
-
-
 def _normalize_distribution(distribution: dict[str, float]) -> dict[str, float]:
-    labels = {"phishing", "spam", "legitimate"}
-    merged = {label: max(0.0, float(distribution.get(label, 0.0))) for label in labels}
+    merged: dict[str, float] = {}
+    for label in _LABELS:
+        try:
+            value = float(distribution.get(label, 0.0))
+        except (TypeError, ValueError):
+            value = 0.0
+        merged[label] = value if math.isfinite(value) and value > 0.0 else 0.0
     total = sum(merged.values())
     if total <= 0.0:
-        return {"phishing": 0.0, "spam": 0.5, "legitimate": 0.5}
-    return {label: merged[label] / total for label in labels}
+        return {"phishing": 1.0 / 3.0, "spam": 1.0 / 3.0, "legitimate": 1.0 / 3.0}
+    return {label: merged[label] / total for label in _LABELS}
 
 
-def _binary_to_distribution(
-    *,
-    phishing_prob: float,
-    non_phishing_split: tuple[float, float] = (0.5, 0.5),
-) -> dict[str, float]:
-    p = min(max(phishing_prob, 0.0), 1.0)
-    spam_share, legit_share = non_phishing_split
-    spread = max(spam_share, 0.0) + max(legit_share, 0.0)
-    if spread <= 0.0:
-        spam_share, legit_share = 0.5, 0.5
-        spread = 1.0
-    non_p = 1.0 - p
-    return {
-        "phishing": p,
-        "spam": non_p * (spam_share / spread),
-        "legitimate": non_p * (legit_share / spread),
+def _rounded_distribution(distribution: dict[str, float]) -> dict[str, float]:
+    """Round a distribution while preserving the exact probability invariant."""
+
+    normalized = _normalize_distribution(distribution)
+    rounded = {label: round(normalized[label], 4) for label in _LABELS}
+    residual = round(1.0 - sum(rounded.values()), 4)
+    largest = max(_LABELS, key=lambda label: rounded[label])
+    rounded[largest] = round(rounded[largest] + residual, 4)
+    return rounded
+
+
+def _distribution_from_result(result: LLMResult) -> dict[str, float]:
+    if result.probabilities:
+        distribution = _normalize_distribution(result.probabilities)
+        if result.label == "uncertain":
+            # An abstention may contain a directional hint, but it is not a
+            # full-strength semantic vote. Shrink it toward maximum entropy so
+            # it cannot overpower a decisive local classifier.
+            factor = min(
+                _env_float("LLM_UNCERTAIN_EVIDENCE_FACTOR", 0.35),
+                1.0,
+            )
+            uniform = 1.0 / len(_LABELS)
+            return _normalize_distribution(
+                {
+                    label: uniform + factor * (distribution[label] - uniform)
+                    for label in _LABELS
+                }
+            )
+        return distribution
+    if result.label in _LABELS:
+        confidence = min(max(result.confidence, 0.0), 1.0)
+        residual = (1.0 - confidence) / 2.0
+        return {
+            label: confidence if label == result.label else residual
+            for label in _LABELS
+        }
+    return {label: 1.0 / 3.0 for label in _LABELS}
+
+
+def _fuse_semantic_distributions(
+    stages: dict[str, dict[str, float]],
+    weights: dict[str, float],
+) -> tuple[dict[str, float], dict[str, float]]:
+    active = {
+        stage: max(weights.get(stage, 0.0), 0.0)
+        for stage in stages
+        if weights.get(stage, 0.0) > 0.0
     }
+    total = sum(active.values())
+    if total <= 0.0:
+        return (
+            {"phishing": 1.0 / 3.0, "spam": 1.0 / 3.0, "legitimate": 1.0 / 3.0},
+            {},
+        )
+    applied = {stage: weight / total for stage, weight in active.items()}
+    fused = {label: 0.0 for label in _LABELS}
+    for stage, weight in applied.items():
+        distribution = _normalize_distribution(stages[stage])
+        for label in _LABELS:
+            fused[label] += distribution[label] * weight
+    return _normalize_distribution(fused), applied
+
+
+def _scale_evidence(score: float, configured: float, default: float) -> float:
+    bounded = min(max(score, 0.0), 1.0)
+    if bounded <= 0.0 or configured <= 0.0:
+        return 0.0
+    ratio = min(max(configured / default, 0.0), 2.0)
+    return 1.0 - (1.0 - bounded) ** ratio
+
+
+def _apply_phishing_evidence(
+    distribution: dict[str, float],
+    evidence: list[tuple[str, float]],
+) -> dict[str, float]:
+    result = _normalize_distribution(distribution)
+    phishing = result["phishing"]
+    for _, strength in evidence:
+        phishing = 1.0 - (1.0 - phishing) * (1.0 - min(max(strength, 0.0), 1.0))
+    phishing = min(max(phishing, 0.0), 1.0)
+    non_phishing = max(1.0 - result["phishing"], 1e-12)
+    spam_share = result["spam"] / non_phishing
+    legitimate_share = result["legitimate"] / non_phishing
+    remaining = 1.0 - phishing
+    return _normalize_distribution(
+        {
+            "phishing": phishing,
+            "spam": remaining * spam_share,
+            "legitimate": remaining * legitimate_share,
+        }
+    )
+
+
+def _timed_onnx(canonical: CanonicalEmail) -> tuple[OnnxResult, float]:
+    started = time.perf_counter()
+    result = classify_onnx(canonical.model_text)
+    return result, (time.perf_counter() - started) * 1000.0
+
+
+def _timed_llm(canonical: CanonicalEmail) -> tuple[LLMResult | None, float]:
+    started = time.perf_counter()
+    result = classify_llm(
+        canonical.body,
+        sender=canonical.sender_domain,
+        subject=canonical.subject,
+    )
+    return result, (time.perf_counter() - started) * 1000.0
 
 
 def run_pipeline(
@@ -96,211 +194,186 @@ def run_pipeline(
     use_virustotal: bool = False,
     use_llm: bool = True,
 ) -> ClassificationResult:
-    """Run all stages and return a composite ClassificationResult.
+    """Run canonicalization, semantic classification and phishing evidence fusion."""
 
-    Parameters
-    ----------
-    text:
-        Raw message text (SMS, email body, etc.)
-    subject:
-        Optional email subject used by the LLM stage for extra context.
-    sender:
-        Optional sender email/address used by the LLM stage for extra context.
-    use_virustotal:
-        Pass True to enable the VirusTotal enrichment in the blocklist stage.
-        Adds latency; off by default.
-    use_llm:
-        Set False to skip the LLM stage (useful in unit tests or when budget
-        is a concern for a specific request).
-    """
-    # Stage weights
-    w_rules = _env_float("WEIGHT_RULES", 0.10)
-    w_block = _env_float("WEIGHT_BLOCKLIST", 0.25)
+    w_rules = _env_float("WEIGHT_RULES", _DEFAULT_RULE_WEIGHT)
+    w_block = _env_float("WEIGHT_BLOCKLIST", _DEFAULT_BLOCKLIST_WEIGHT)
     w_onnx = _env_float("WEIGHT_ONNX", 0.20)
     w_llm = _env_float("WEIGHT_LLM", 0.45)
+    threshold = _env_float("PHISHING_THRESHOLD", 0.5)
 
+    canonical = canonicalize_email(text, subject=subject, sender=sender)
+    stage_latencies_ms: dict[str, float] = {}
     stage_scores: dict[str, float] = {}
     stage_labels: dict[str, str] = {}
-    stage_latencies_ms: dict[str, float] = {}
-    active_weights: dict[str, float] = {}
     stage_distributions: dict[str, dict[str, float]] = {}
-    stage_breakdown: dict[str, dict[str, Any]] = {}
-    explanation = ""
-    llm_provider = ""
+    stage_breakdown: dict[str, dict[str, Any]] = {
+        "input": {
+            "active": True,
+            "source_format": canonical.source_format,
+            "body_chars": len(canonical.body),
+        }
+    }
+    degraded_reasons: list[str] = []
 
-    # ── Stage 1: Rules ───────────────────────────────────────────────────────
-    stage_started = time.perf_counter()
-    rule_res: RuleResult = check_url_rules(text)
-    stage_latencies_ms["rules"] = round((time.perf_counter() - stage_started) * 1000.0, 3)
+    onnx_future: Future[tuple[OnnxResult, float]] = _SEMANTIC_EXECUTOR.submit(
+        _timed_onnx,
+        canonical,
+    )
+    llm_future: Future[tuple[LLMResult | None, float]] | None = None
+    if use_llm:
+        llm_future = _SEMANTIC_EXECUTOR.submit(_timed_llm, canonical)
+
+    started = time.perf_counter()
+    rule_result: RuleResult = check_url_rules(canonical.security_text)
+    stage_latencies_ms["rules"] = round((time.perf_counter() - started) * 1000.0, 3)
+    rule_strength = 0.0
+    if rule_result.risk_score > 0:
+        rule_strength = _scale_evidence(
+            rule_result.confidence,
+            w_rules,
+            _DEFAULT_RULE_WEIGHT,
+        )
+        stage_scores["rules"] = rule_strength
+        stage_labels["rules"] = "phishing" if rule_result.is_phishing else "suspicious"
     stage_breakdown["rules"] = {
-        "active": False,
+        "active": rule_strength > 0.0,
         "configured_weight": w_rules,
-        "reason": "No URLs found",
-        "risk_score": rule_res.risk_score,
-        "reasons": rule_res.reasons,
+        "risk_score": rule_result.risk_score,
+        "reasons": rule_result.reasons,
+        "phishing_evidence": round(rule_strength, 6),
     }
-    if rule_res.reasons and rule_res.reasons != ["No URLs found"]:
-        score = _phishing_score(
-            "phishing" if rule_res.is_phishing else "safe",
-            rule_res.confidence,
-        )
-        stage_scores["rules"] = score
-        stage_labels["rules"] = "phishing" if rule_res.is_phishing else "safe"
-        active_weights["rules"] = w_rules
-        stage_distributions["rules"] = _binary_to_distribution(phishing_prob=score)
-        stage_breakdown["rules"] = {
-            "active": True,
-            "configured_weight": w_rules,
-            "reason": "URL rule evidence available",
-            "risk_score": rule_res.risk_score,
-            "reasons": rule_res.reasons,
-            "phishing_score": score,
-            "label_distribution": stage_distributions["rules"],
-        }
-    # if no URLs found, rules stage is omitted from weighting
 
-    # ── Stage 2: Blocklist ───────────────────────────────────────────────────
-    stage_started = time.perf_counter()
-    block_res: BlocklistResult = check_blocklists(text, use_virustotal=use_virustotal)
-    stage_latencies_ms["blocklist"] = round((time.perf_counter() - stage_started) * 1000.0, 3)
+    started = time.perf_counter()
+    block_result: BlocklistResult = check_blocklists(
+        canonical.security_text,
+        use_virustotal=use_virustotal,
+    )
+    stage_latencies_ms["blocklist"] = round((time.perf_counter() - started) * 1000.0, 3)
+    block_strength = 0.0
+    if block_result.is_known_phishing:
+        block_strength = _scale_evidence(
+            block_result.confidence,
+            w_block,
+            _DEFAULT_BLOCKLIST_WEIGHT,
+        )
+        stage_scores["blocklist"] = block_strength
+        stage_labels["blocklist"] = "phishing"
     stage_breakdown["blocklist"] = {
-        "active": False,
+        "active": block_strength > 0.0,
         "configured_weight": w_block,
-        "source": block_res.source,
-        "detail": block_res.detail,
-        "reason": "No blocklist hit",
+        "source": block_result.source,
+        "detail": block_result.detail,
+        "phishing_evidence": round(block_strength, 6),
     }
-    if block_res.source != "clean" or block_res.is_known_phishing:
-        score = _phishing_score(
-            "phishing" if block_res.is_known_phishing else "safe",
-            block_res.confidence if block_res.is_known_phishing else 0.0,
-        )
-        stage_scores["blocklist"] = score
-        stage_labels["blocklist"] = "phishing" if block_res.is_known_phishing else "safe"
-        active_weights["blocklist"] = w_block
-        stage_distributions["blocklist"] = _binary_to_distribution(phishing_prob=score)
-        stage_breakdown["blocklist"] = {
-            "active": True,
-            "configured_weight": w_block,
-            "source": block_res.source,
-            "detail": block_res.detail,
-            "reason": "Matched known malicious indicator",
-            "phishing_score": score,
-            "label_distribution": stage_distributions["blocklist"],
-        }
-    # A clean blocklist miss is neutral evidence, so it is omitted.
 
-    # ── Stage 3: ONNX ────────────────────────────────────────────────────────
-    stage_started = time.perf_counter()
-    onnx_res: OnnxResult = classify_onnx(text)
-    stage_latencies_ms["onnx"] = round((time.perf_counter() - stage_started) * 1000.0, 3)
-    stage_scores["onnx"] = _onnx_phishing_score(onnx_res)
-    stage_labels["onnx"] = onnx_res.label
-    active_weights["onnx"] = w_onnx
-    onnx_distribution = _normalize_distribution(onnx_res.raw_scores)
+    onnx_result, onnx_latency = onnx_future.result()
+    stage_latencies_ms["onnx"] = round(onnx_latency, 3)
+    onnx_distribution = _normalize_distribution(onnx_result.raw_scores)
     stage_distributions["onnx"] = onnx_distribution
+    stage_scores["onnx"] = onnx_distribution["phishing"]
+    stage_labels["onnx"] = onnx_result.label
     stage_breakdown["onnx"] = {
         "active": True,
         "configured_weight": w_onnx,
-        "reason": "Base model output",
-        "predicted_label": onnx_res.label,
-        "confidence": onnx_res.confidence,
-        "phishing_score": stage_scores["onnx"],
+        "predicted_label": onnx_result.label,
+        "confidence": onnx_result.confidence,
         "label_distribution": onnx_distribution,
     }
 
-    # ── Stage 4: LLM ─────────────────────────────────────────────────────────
-    llm_res: LLMResult | None = None
-    stage_breakdown["llm"] = {
-        "active": False,
-        "configured_weight": w_llm,
-        "reason": "Disabled or no provider response",
-    }
-    if use_llm:
-        stage_started = time.perf_counter()
-        llm_res = classify_llm(text, sender=sender, subject=subject)
-        stage_latencies_ms["llm"] = round((time.perf_counter() - stage_started) * 1000.0, 3)
-    if llm_res is not None:
-        stage_scores["llm"] = _phishing_score(llm_res.label, llm_res.confidence)
-        stage_labels["llm"] = llm_res.label
-        active_weights["llm"] = w_llm
-        explanation = llm_res.explanation
-        llm_provider = llm_res.provider
-
-        non_phishing_split = (
-            onnx_distribution.get("spam", 0.5),
-            onnx_distribution.get("legitimate", 0.5),
-        )
-        stage_distributions["llm"] = _binary_to_distribution(
-            phishing_prob=stage_scores["llm"],
-            non_phishing_split=non_phishing_split,
-        )
+    llm_result: LLMResult | None = None
+    if llm_future is not None:
+        llm_result, llm_latency = llm_future.result()
+        stage_latencies_ms["llm"] = round(llm_latency, 3)
+    if llm_result is not None:
+        llm_distribution = _distribution_from_result(llm_result)
+        stage_distributions["llm"] = llm_distribution
+        stage_scores["llm"] = llm_distribution["phishing"]
+        stage_labels["llm"] = llm_result.label
         stage_breakdown["llm"] = {
             "active": True,
             "configured_weight": w_llm,
-            "reason": "LLM response available",
-            "provider": llm_res.provider,
-            "label": llm_res.label,
-            "confidence": llm_res.confidence,
-            "phishing_score": stage_scores["llm"],
-            "label_distribution": stage_distributions["llm"],
+            "provider": llm_result.provider,
+            "predicted_label": llm_result.label,
+            "confidence": llm_result.confidence,
+            "label_distribution": llm_distribution,
         }
-
-    # ── Composite score ──────────────────────────────────────────────────────
-    total_weight = sum(active_weights.values())
-    applied_weights: dict[str, float] = {}
-    stage_contributions: dict[str, float] = {}
-    if total_weight == 0:
-        composite = 0.5  # no signal at all — neutral
-        label_distribution = {"phishing": 0.5, "spam": 0.25, "legitimate": 0.25}
     else:
-        applied_weights = {
-            stage: weight / total_weight for stage, weight in active_weights.items()
+        stage_breakdown["llm"] = {
+            "active": False,
+            "configured_weight": w_llm,
+            "reason": "disabled" if not use_llm else "provider_chain_unavailable",
         }
-        stage_contributions = {
-            stage: stage_scores[stage] * applied_weights[stage] for stage in applied_weights
-        }
-        composite = sum(stage_contributions.values())
+        if use_llm:
+            degraded_reasons.append("llm_unavailable")
 
-        aggregate_distribution = {"phishing": 0.0, "spam": 0.0, "legitimate": 0.0}
-        for stage, weight in applied_weights.items():
-            dist = stage_distributions.get(stage)
-            if dist is None:
-                dist = _binary_to_distribution(phishing_prob=stage_scores[stage])
-            for label in aggregate_distribution:
-                aggregate_distribution[label] += dist[label] * weight
-        label_distribution = _normalize_distribution(aggregate_distribution)
-
-    for stage_name, details in stage_breakdown.items():
-        details["applied_weight"] = round(applied_weights.get(stage_name, 0.0), 6)
-        details["contribution"] = round(stage_contributions.get(stage_name, 0.0), 6)
-
-    threshold = _env_float("PHISHING_THRESHOLD", 0.5)
-    is_phishing = composite >= threshold
+    semantic_distribution, semantic_weights = _fuse_semantic_distributions(
+        stage_distributions,
+        {"onnx": w_onnx, "llm": w_llm},
+    )
+    evidence = [
+        (name, strength)
+        for name, strength in (
+            ("rules", rule_strength),
+            ("blocklist", block_strength),
+        )
+        if strength > 0.0
+    ]
+    label_distribution = _apply_phishing_evidence(semantic_distribution, evidence)
+    phishing_probability = label_distribution["phishing"]
+    is_phishing = phishing_probability >= threshold
     verdict = "phishing" if is_phishing else "safe"
-    label_verdict = max(
-        label_distribution.items(),
-        key=lambda item: item[1],
-    )[0]
+    if is_phishing:
+        label_verdict = "phishing"
+    else:
+        label_verdict = max(
+            ("spam", "legitimate"),
+            key=lambda label: label_distribution[label],
+        )
+
+    applied_weights = dict(semantic_weights)
+    if rule_strength > 0.0:
+        applied_weights["rules"] = rule_strength
+    if block_strength > 0.0:
+        applied_weights["blocklist"] = block_strength
+    stage_contributions = {
+        stage: (
+            stage_scores.get(stage, 0.0) * semantic_weights[stage]
+            if stage in semantic_weights
+            else stage_scores.get(stage, 0.0)
+        )
+        for stage in applied_weights
+    }
+    for stage, details in stage_breakdown.items():
+        details["applied_weight"] = round(applied_weights.get(stage, 0.0), 6)
+        details["contribution"] = round(stage_contributions.get(stage, 0.0), 6)
 
     return ClassificationResult(
         verdict=verdict,
         label_verdict=label_verdict,
-        composite_score=round(composite, 4),
+        composite_score=round(phishing_probability, 4),
         is_phishing=is_phishing,
-        stage_scores={k: round(v, 4) for k, v in stage_scores.items()},
+        stage_scores={key: round(value, 4) for key, value in stage_scores.items()},
         stage_labels=stage_labels,
-        label_distribution={k: round(v, 4) for k, v in label_distribution.items()},
+        label_distribution=_rounded_distribution(label_distribution),
         stage_weights_configured={
             "rules": round(w_rules, 4),
             "blocklist": round(w_block, 4),
             "onnx": round(w_onnx, 4),
             "llm": round(w_llm, 4),
         },
-        stage_weights_applied={k: round(v, 4) for k, v in applied_weights.items()},
-        stage_contributions={k: round(v, 4) for k, v in stage_contributions.items()},
+        stage_weights_applied={
+            key: round(value, 4)
+            for key, value in applied_weights.items()
+        },
+        stage_contributions={
+            key: round(value, 4)
+            for key, value in stage_contributions.items()
+        },
         stage_breakdown=stage_breakdown,
         stage_latencies_ms=stage_latencies_ms,
-        explanation=explanation,
-        llm_provider=llm_provider,
+        explanation=llm_result.explanation if llm_result else "",
+        llm_provider=llm_result.provider if llm_result else "",
+        degraded_reasons=degraded_reasons,
+        input_format=canonical.source_format,
     )

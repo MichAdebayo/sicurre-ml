@@ -188,6 +188,32 @@ jobs:
                 ;;
             esac
 
+            read_root_env() {
+              value=$(sed -n "s/^$1=//p" .env | tail -1)
+              value=${value#\"}
+              value=${value%\"}
+              value=${value#\'}
+              value=${value%\'}
+              printf '%s' "$value"
+            }
+            expected_model_revision=$(read_root_env HF_MODEL_REVISION)
+            expected_model_version=$(read_root_env MODEL_VERSION)
+            mistral_model=$(read_root_env MISTRAL_MODEL)
+            if [[ ! "$expected_model_revision" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Server .env HF_MODEL_REVISION must be an immutable 40-character lowercase HF commit." >&2
+              exit 1
+            fi
+            if [ -z "$expected_model_version" ]; then
+              echo "Server .env MODEL_VERSION must be non-empty." >&2
+              exit 1
+            fi
+            case "$mistral_model" in
+              ""|*latest*)
+                echo "Server .env MISTRAL_MODEL must use a pinned provider model ID, not a floating latest alias." >&2
+                exit 1
+                ;;
+            esac
+
             previous_tag=$(sed -n 's/^IMAGE_TAG=//p' .env | tail -1)
             if [ -n "$previous_tag" ]; then
               printf '%s\n' "$previous_tag" > .previous-image-tag
@@ -286,6 +312,20 @@ jobs:
             cd "${{ secrets.DEPLOY_PATH }}"
 
             validate() {
+              read_root_env() {
+                value=$(sed -n "s/^$1=//p" .env | tail -1)
+                value=${value#\"}
+                value=${value%\"}
+                value=${value#\'}
+                value=${value%\'}
+                printf '%s' "$value"
+              }
+              expected_model_revision=$(read_root_env HF_MODEL_REVISION)
+              expected_model_version=$(read_root_env MODEL_VERSION)
+              if [[ ! "$expected_model_revision" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "Cannot validate an unpinned model revision." >&2
+                return 1
+              fi
               app_container=$(docker compose -f docker-compose.prod.yml ps -q app)
               if [ -z "$app_container" ]; then
                 echo "Unable to resolve the running app container." >&2
@@ -300,6 +340,8 @@ jobs:
               if ! docker exec \
                 --env INFERENCE_INTERNAL_URL=http://127.0.0.1:8000 \
                 --env INFERENCE_VALIDATION_HOST=inference.sicurre.internal \
+                --env EXPECTED_MODEL_REVISION="$expected_model_revision" \
+                --env EXPECTED_MODEL_VERSION="$expected_model_version" \
                 --env DEPLOYMENT_MANIFEST_OUTPUT=/tmp/current-deployment.json \
                 "$app_container" \
                 /app/.venv/bin/python /tmp/validate_deployment.py; then
