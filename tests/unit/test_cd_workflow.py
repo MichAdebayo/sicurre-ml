@@ -135,6 +135,27 @@ def test_dashboard_and_alerts_distinguish_app_from_alloy() -> None:
     ]
 
 
+def test_dashboard_is_an_inference_command_center() -> None:
+    dashboard = json.loads(
+        Path("deploy/grafana/dashboards/sicurre-ml-runtime.json").read_text(encoding="utf-8")
+    )
+    panels = {panel["title"]: panel for panel in dashboard["panels"]}
+
+    assert dashboard["title"] == "Sicurre ML / Inference Command Center"
+    assert dashboard["time"]["from"] == "now-24h"
+    assert len(dashboard["panels"]) >= 20
+    assert panels["Active model"]["options"]["textMode"] == "name"
+    assert panels["Inference process memory"]["fieldConfig"]["defaults"]["unit"] == "bytes"
+    assert panels["Inference process CPU"]["fieldConfig"]["defaults"]["unit"] == "cores"
+    assert "increase(sicurre_inference_label_total" in panels[
+        "Classification volume by label"
+    ]["targets"][0]["expr"]
+    assert "sicurre_inference_llm_provider_total" in panels["LLM provider usage"][
+        "targets"
+    ][0]["expr"]
+    assert "vector(0)" in panels["Degraded decisions"]["targets"][0]["expr"]
+
+
 def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:
     validator = Path("deploy/scripts/validate_observability.py").read_text(encoding="utf-8")
 
