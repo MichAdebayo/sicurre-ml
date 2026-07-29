@@ -4,6 +4,7 @@ import httpx
 
 from src.inference import llm_classifier
 from src.inference.llm_classifier import LLMResult
+from src.inference.mail_context import MailContext
 
 
 def test_user_prompt_includes_sender_subject_and_text() -> None:
@@ -19,6 +20,23 @@ def test_user_prompt_includes_sender_subject_and_text() -> None:
     assert "Merci de confirmer votre compte." in prompt
 
 
+def test_user_prompt_separates_gateway_context_from_untrusted_content() -> None:
+    prompt = llm_classifier._user_prompt(
+        text="Vous recevez ce message parce que vous êtes abonné.",
+        sender="news@example.fr",
+        subject="Fwd: Actualités",
+        mail_context=MailContext(
+            structured_forward=True,
+            outer_sender_authenticated=True,
+            subscription_claimed=True,
+        ),
+    )
+
+    assert prompt.index("<CONTEXTE_PASSERELLE>") < prompt.index("<EMAIL_NON_FIABLE>")
+    assert "transfert_structure=true" in prompt
+    assert "expediteur_externe_authentifie=true" in prompt
+
+
 def test_classify_llm_forwards_sender_and_subject(monkeypatch) -> None:
     captured: dict[str, str | None] = {}
 
@@ -26,12 +44,14 @@ def test_classify_llm_forwards_sender_and_subject(monkeypatch) -> None:
         text: str,
         sender: str | None = None,
         subject: str | None = None,
+        mail_context: MailContext | None = None,
         *,
         timeout_seconds: float | None = None,
     ) -> LLMResult:
         captured["text"] = text
         captured["sender"] = sender
         captured["subject"] = subject
+        assert mail_context is None
         assert timeout_seconds is not None
         assert timeout_seconds > 0
         return LLMResult(

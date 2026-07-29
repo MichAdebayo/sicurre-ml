@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field  # noqa: E402
 
 from src.inference import onnx_classifier  # noqa: E402
 from src.inference.llm_classifier import close_http_client  # noqa: E402
+from src.inference.mail_context import MailContext  # noqa: E402
 from src.inference.phishtank_loader import get_phishtank_set  # noqa: E402
 from src.inference.pipeline import ClassificationResult, run_pipeline  # noqa: E402
 from src.serving.identity import deployment_manifest, response_identity_headers  # noqa: E402
@@ -168,12 +169,25 @@ def _enforce_rate_limit() -> None:
 # Schemas
 # ---------------------------------------------------------------------------
 
+class MailContextRequest(BaseModel):
+    """Privacy-safe transport evidence derived by the authorized gateway."""
+
+    structured_forward: bool = False
+    outer_sender_authenticated: bool = False
+    mailing_list_headers: bool = False
+    subscription_claimed: bool = False
+
+
 class ClassifyRequest(BaseModel):
     subject: str = Field(default="", max_length=500, description="Email subject")
     sender: str = Field(default="", max_length=320, description="Email sender address")
     text: str = Field(..., min_length=1, max_length=10000, description="Email message body")
     use_virustotal: bool = Field(False, description="Enable VirusTotal enrichment (adds latency)")
     use_llm: bool = Field(True, description="Enable LLM stage")
+    mail_context: MailContextRequest = Field(
+        default_factory=MailContextRequest,
+        description="Bounded gateway-derived context; never raw headers or user content",
+    )
 
 
 class ClassifyResponse(BaseModel):
@@ -293,6 +307,12 @@ def classify(
             sender=request.sender,
             use_virustotal=request.use_virustotal,
             use_llm=request.use_llm,
+            mail_context=MailContext(
+                structured_forward=request.mail_context.structured_forward,
+                outer_sender_authenticated=request.mail_context.outer_sender_authenticated,
+                mailing_list_headers=request.mail_context.mailing_list_headers,
+                subscription_claimed=request.mail_context.subscription_claimed,
+            ),
         )
     except Exception:
         latency_ms = (time.perf_counter() - started_at) * 1000.0

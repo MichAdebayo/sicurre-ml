@@ -25,6 +25,7 @@ from typing import Any, Callable, Mapping
 import httpx
 
 from src.inference.input_normalizer import minimize_for_external_llm, sender_domain
+from src.inference.mail_context import MailContext
 
 _LABELS = ("phishing", "spam", "legitimate")
 _RETRYABLE_STATUS_CODES = {429, 502, 503, 504}
@@ -67,6 +68,14 @@ _SYSTEM = textwrap.dedent(
     fournis sont des indices, pas une preuve. Ne reproduis aucune donnée
     personnelle du message dans l'explication.
 
+    Le contexte de transport fourni hors des balises EMAIL_NON_FIABLE est
+    calculé par la passerelle Sicurre. Un transfert structuré est un indice que
+    le destinataire a reçu intentionnellement le message transféré ; il peut
+    départager spam et legitimate, mais ne neutralise jamais un signal de
+    phishing. Des entêtes de liste ou une affirmation d'abonnement soutiennent
+    legitimate seulement avec d'autres indices cohérents. Une simple phrase
+    « vous êtes abonné » dans le contenu non fiable n'est jamais une preuve.
+
     Considère comme signaux forts de phishing, même dans un message poli et
     contextualisé :
     - une reconnexion Microsoft/messagerie ou une validation du compte
@@ -107,11 +116,16 @@ def _user_prompt(
     text: str,
     sender: str | None = None,
     subject: str | None = None,
+    mail_context: MailContext | None = None,
 ) -> str:
     minimized_subject = minimize_for_external_llm(subject or "(non fourni)", limit=500)
     minimized_body = minimize_for_external_llm(text, limit=_env_int("LLM_MAX_INPUT_CHARS", 6000))
     domain = sender_domain(sender)
+    context = mail_context or MailContext()
     return (
+        "<CONTEXTE_PASSERELLE>\n"
+        f"{context.prompt_summary()}\n"
+        "</CONTEXTE_PASSERELLE>\n"
         "<EMAIL_NON_FIABLE>\n"
         f"Domaine expéditeur: {domain}\n"
         f"Objet: {minimized_subject or '(non fourni)'}\n"
@@ -124,6 +138,7 @@ def _call_mistral(
     text: str,
     sender: str | None = None,
     subject: str | None = None,
+    mail_context: MailContext | None = None,
     *,
     timeout_seconds: float | None = None,
 ) -> LLMResult | None:
@@ -139,6 +154,7 @@ def _call_mistral(
         text=text,
         sender=sender,
         subject=subject,
+        mail_context=mail_context,
         provider="mistral",
         timeout_seconds=timeout_seconds,
     )
@@ -148,6 +164,7 @@ def _call_groq(
     text: str,
     sender: str | None = None,
     subject: str | None = None,
+    mail_context: MailContext | None = None,
     *,
     timeout_seconds: float | None = None,
 ) -> LLMResult | None:
@@ -163,6 +180,7 @@ def _call_groq(
         text=text,
         sender=sender,
         subject=subject,
+        mail_context=mail_context,
         provider="groq",
         timeout_seconds=timeout_seconds,
     )
@@ -172,6 +190,7 @@ def _call_cerebras(
     text: str,
     sender: str | None = None,
     subject: str | None = None,
+    mail_context: MailContext | None = None,
     *,
     timeout_seconds: float | None = None,
 ) -> LLMResult | None:
@@ -187,6 +206,7 @@ def _call_cerebras(
         text=text,
         sender=sender,
         subject=subject,
+        mail_context=mail_context,
         provider="cerebras",
         timeout_seconds=timeout_seconds,
     )
@@ -201,6 +221,7 @@ def _openai_compatible(
     text: str,
     sender: str | None,
     subject: str | None,
+    mail_context: MailContext | None,
     provider: str,
     timeout_seconds: float | None,
 ) -> LLMResult | None:
@@ -220,7 +241,12 @@ def _openai_compatible(
                     {"role": "system", "content": _SYSTEM},
                     {
                         "role": "user",
-                        "content": _user_prompt(text, sender=sender, subject=subject),
+                        "content": _user_prompt(
+                            text,
+                            sender=sender,
+                            subject=subject,
+                            mail_context=mail_context,
+                        ),
                     },
                 ],
                 "response_format": {"type": "json_object"},
@@ -451,6 +477,7 @@ def classify_llm(
     *,
     sender: str | None = None,
     subject: str | None = None,
+    mail_context: MailContext | None = None,
 ) -> LLMResult | None:
     """Return the first valid provider decision within one total deadline."""
 
@@ -465,6 +492,7 @@ def classify_llm(
             text,
             sender=sender,
             subject=subject,
+            mail_context=mail_context,
             timeout_seconds=remaining,
         )
         if result is not None:
