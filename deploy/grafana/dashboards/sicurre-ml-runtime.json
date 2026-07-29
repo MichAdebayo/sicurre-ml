@@ -1,125 +1,296 @@
 {
   "annotations": {"list": []},
+  "description": "Production command view for Sicurre ML inference. Metrics only; use Grafana Logs and Traces Drilldown for diagnostics.",
   "editable": true,
   "graphTooltip": 1,
+  "links": [],
   "panels": [
     {
-      "type": "timeseries", "title": "Request rate", "id": 1,
+      "id": 1,
+      "type": "stat",
+      "title": "Metrics scrape health",
+      "description": "Latest scrape of the inference application. DOWN means Grafana cannot observe the service.",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [{"expr": "sum(rate(sicurre_inference_requests_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "requests/s"}],
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0}
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "HEALTHY", "color": "green"}}}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        },
+        "overrides": []
+      },
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"expr": "max(up{stack=\"sicurre-ml\",service_name=\"sicurre-ml-inference\"})", "legendFormat": "Inference API", "refId": "A"}]
     },
     {
-      "type": "timeseries", "title": "Status distribution", "id": 2,
+      "id": 2,
+      "type": "stat",
+      "title": "Model readiness",
+      "description": "Whether the immutable ONNX model is loaded and ready to classify.",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [{"expr": "sum by (status_code) (rate(sicurre_inference_request_status_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "{{status_code}}"}],
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0}
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [{"type": "value", "options": {"0": {"text": "NOT READY", "color": "red"}, "1": {"text": "READY", "color": "green"}}}],
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+        },
+        "overrides": []
+      },
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"expr": "max(sicurre_model_ready{stack=\"sicurre-ml\"})", "legendFormat": "Model", "refId": "A"}]
     },
     {
-      "type": "stat", "title": "Metrics scrape health", "id": 3,
+      "id": 3,
+      "type": "stat",
+      "title": "Classifications in selected range",
+      "description": "Completed authenticated inference requests in the selected dashboard interval.",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [{"expr": "up{stack=\"sicurre-ml\",service_name=\"sicurre-ml-inference\"}", "legendFormat": "app"}],
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0}
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"expr": "sum(increase(sicurre_inference_requests_total{stack=\"sicurre-ml\"}[$__range]))", "legendFormat": "Classifications", "refId": "A"}]
     },
     {
-      "type": "timeseries", "title": "Inference latency p50 / p95 / p99", "id": 4,
+      "id": 4,
+      "type": "stat",
+      "title": "p95 inference latency",
+      "description": "p95 over the selected interval. Target: under 1s without LLM and under 8s with LLM.",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "fieldConfig": {"defaults": {"unit": "ms", "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1000}, {"color": "red", "value": 8000}]}}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le) (increase(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[$__range])))", "legendFormat": "p95", "refId": "A"}]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Active model",
+      "description": "Semantic model identity currently exposed by the running inference service.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 5},
+      "fieldConfig": {"defaults": {"color": {"mode": "fixed_color", "fixedColor": "blue"}}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "name", "wideLayout": true, "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"expr": "max by (version) (sicurre_inference_model_info{stack=\"sicurre-ml\"})", "legendFormat": "{{version}}", "refId": "A"}]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Server error rate",
+      "description": "5xx responses as a share of inference responses. Objective: below 2%.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 5, "w": 8, "x": 8, "y": 5},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "decimals": 2, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 0.01}, {"color": "red", "value": 0.02}]}}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"expr": "(sum(increase(sicurre_inference_request_status_total{stack=\"sicurre-ml\",status_code=~\"5..\"}[$__range])) or vector(0)) / clamp_min(sum(increase(sicurre_inference_request_status_total{stack=\"sicurre-ml\"}[$__range])), 1)", "legendFormat": "5xx rate", "refId": "A"}]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Degraded decisions",
+      "description": "Successful classifications completed with reduced evidence, normally because the LLM stage was unavailable.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 5, "w": 8, "x": 16, "y": 5},
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"expr": "sum(increase(sicurre_inference_degradation_total{stack=\"sicurre-ml\"}[$__range])) or vector(0)", "legendFormat": "Degraded", "refId": "A"}]
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Classification behaviour",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 10},
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Classification volume by label",
+      "description": "Low-traffic-friendly counts per Grafana interval, separated by the final tri-class label.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 11},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 65, "stacking": {"mode": "normal", "group": "labels"}}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["sum"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (label) (increase(sicurre_inference_label_total{stack=\"sicurre-ml\"}[$__rate_interval]))", "legendFormat": "{{label}}", "refId": "A"}]
+    },
+    {
+      "id": 10,
+      "type": "piechart",
+      "title": "Final label mix",
+      "description": "Share of phishing, spam, and legitimate classifications in the selected interval.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 9, "w": 6, "x": 12, "y": 11},
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0}, "overrides": []},
+      "options": {"pieType": "donut", "displayLabels": ["name", "percent"], "legend": {"displayMode": "table", "placement": "bottom", "values": ["value", "percent"]}, "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""}},
+      "targets": [{"expr": "sum by (label) (increase(sicurre_inference_label_total{stack=\"sicurre-ml\"}[$__range]))", "legendFormat": "{{label}}", "refId": "A", "instant": true}]
+    },
+    {
+      "id": 11,
+      "type": "piechart",
+      "title": "LLM provider usage",
+      "description": "Which provider completed the LLM stage. Unexpected fallback share is an early reliability signal.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 9, "w": 6, "x": 18, "y": 11},
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0}, "overrides": []},
+      "options": {"pieType": "donut", "displayLabels": ["name", "percent"], "legend": {"displayMode": "table", "placement": "bottom", "values": ["value", "percent"]}, "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""}},
+      "targets": [{"expr": "sum by (provider) (increase(sicurre_inference_llm_provider_total{stack=\"sicurre-ml\"}[$__range]))", "legendFormat": "{{provider}}", "refId": "A", "instant": true}]
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Performance and bottlenecks",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 20},
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Inference latency percentiles",
+      "description": "End-to-end request latency. The LLM path should remain below the 8s certification objective.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 21},
+      "fieldConfig": {"defaults": {"unit": "ms", "decimals": 0, "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
-        {"expr": "histogram_quantile(0.50, sum by (le) (rate(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[5m])))", "legendFormat": "p50"},
-        {"expr": "histogram_quantile(0.95, sum by (le) (rate(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[5m])))", "legendFormat": "p95"},
-        {"expr": "histogram_quantile(0.99, sum by (le) (rate(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[5m])))", "legendFormat": "p99"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+        {"expr": "histogram_quantile(0.50, sum by (le) (rate(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[$__rate_interval])))", "legendFormat": "p50", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum by (le) (rate(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[$__rate_interval])))", "legendFormat": "p95", "refId": "B"},
+        {"expr": "histogram_quantile(0.99, sum by (le) (rate(sicurre_inference_request_latency_ms_bucket{stack=\"sicurre-ml\"}[$__rate_interval])))", "legendFormat": "p99", "refId": "C"}
+      ]
     },
     {
-      "type": "timeseries", "title": "Stage latency", "id": 5,
+      "id": 14,
+      "type": "timeseries",
+      "title": "Average latency by pipeline stage",
+      "description": "Separates local rules, blocklist, ONNX, and LLM time to reveal the dominant bottleneck.",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [{"expr": "sum by (stage) (rate(sicurre_inference_stage_latency_ms_sum{stack=\"sicurre-ml\"}[5m])) / sum by (stage) (rate(sicurre_inference_stage_latency_ms_count{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "{{stage}}"}],
-      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 21},
+      "fieldConfig": {"defaults": {"unit": "ms", "decimals": 0, "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum by (stage) (increase(sicurre_inference_stage_latency_ms_sum{stack=\"sicurre-ml\"}[$__rate_interval])) / clamp_min(sum by (stage) (increase(sicurre_inference_stage_latency_ms_count{stack=\"sicurre-ml\"}[$__rate_interval])), 1)", "legendFormat": "{{stage}}", "refId": "A"}]
     },
     {
-      "type": "timeseries", "title": "Verdict and label distribution", "id": 6,
+      "id": 15,
+      "type": "timeseries",
+      "title": "Latency by inference mode",
+      "description": "Separates local-only and LLM-assisted inference against their different objectives.",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 30},
+      "fieldConfig": {"defaults": {"unit": "ms", "decimals": 0, "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
-        {"expr": "sum by (verdict) (rate(sicurre_inference_verdict_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "verdict: {{verdict}}"},
-        {"expr": "sum by (label) (rate(sicurre_inference_label_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "label: {{label}}"}
-      ],
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16}
+        {"expr": "histogram_quantile(0.95, sum by (mode, le) (rate(sicurre_inference_mode_request_latency_ms_bucket{stack=\"sicurre-ml\"}[$__rate_interval])))", "legendFormat": "p95 {{mode}}", "refId": "A"},
+        {"expr": "histogram_quantile(0.99, sum by (mode, le) (rate(sicurre_inference_mode_request_latency_ms_bucket{stack=\"sicurre-ml\"}[$__rate_interval])))", "legendFormat": "p99 {{mode}}", "refId": "B"}
+      ]
     },
     {
-      "type": "timeseries", "title": "Classifier errors", "id": 7,
-      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [{"expr": "sum by (error_type) (rate(sicurre_inference_error_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "{{error_type}}"}],
-      "gridPos": {"h": 8, "w": 8, "x": 12, "y": 16}
+      "id": 16,
+      "type": "row",
+      "title": "Reliability and protection",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 38},
+      "panels": []
     },
     {
-      "type": "stat", "title": "Active model version", "id": 8,
+      "id": 17,
+      "type": "timeseries",
+      "title": "Classifier failures and degraded paths",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [{"expr": "sicurre_inference_model_info{stack=\"sicurre-ml\"}", "legendFormat": "{{version}}"}],
-      "gridPos": {"h": 8, "w": 4, "x": 20, "y": 16}
-    },
-    {
-      "type": "timeseries", "title": "Latency by inference mode", "id": 9,
-      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 39},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 45}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["sum"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
-        {"expr": "histogram_quantile(0.95, sum by (mode, le) (rate(sicurre_inference_mode_request_latency_ms_bucket{stack=\"sicurre-ml\"}[10m])))", "legendFormat": "p95 {{mode}}"},
-        {"expr": "histogram_quantile(0.99, sum by (mode, le) (rate(sicurre_inference_mode_request_latency_ms_bucket{stack=\"sicurre-ml\"}[10m])))", "legendFormat": "p99 {{mode}}"}
-      ],
-      "fieldConfig": {"defaults": {"unit": "ms"}, "overrides": []},
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24}
+        {"expr": "sum(increase(sicurre_inference_error_total{stack=\"sicurre-ml\"}[$__rate_interval])) or vector(0)", "legendFormat": "Classifier failures", "refId": "A"},
+        {"expr": "sum(increase(sicurre_inference_degradation_total{stack=\"sicurre-ml\"}[$__rate_interval])) or vector(0)", "legendFormat": "Degraded decisions", "refId": "B"}
+      ]
     },
     {
-      "type": "timeseries", "title": "Authentication and rate-limit rejections", "id": 10,
+      "id": 18,
+      "type": "timeseries",
+      "title": "Authentication and rate-limit rejections",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 39},
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "custom": {"drawStyle": "bars", "fillOpacity": 45}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["sum"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
-        {"expr": "sum(rate(sicurre_auth_failure_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "auth failures/s"},
-        {"expr": "sum(rate(sicurre_rate_limit_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "rate limited/s"}
-      ],
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24}
+        {"expr": "sum(increase(sicurre_auth_failure_total{stack=\"sicurre-ml\"}[$__rate_interval]))", "legendFormat": "Invalid bearer", "refId": "A"},
+        {"expr": "sum(increase(sicurre_rate_limit_total{stack=\"sicurre-ml\"}[$__rate_interval]))", "legendFormat": "Rate limited", "refId": "B"}
+      ]
     },
     {
-      "type": "timeseries", "title": "Process memory and CPU", "id": 11,
+      "id": 19,
+      "type": "row",
+      "title": "Capacity and telemetry budget",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 47},
+      "panels": []
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Inference process memory",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 48},
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "max(sicurre_process_resident_memory_bytes{stack=\"sicurre-ml\"})", "legendFormat": "Resident memory", "refId": "A"}]
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "Inference process CPU",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 48},
+      "fieldConfig": {"defaults": {"unit": "cores", "decimals": 3, "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [{"expr": "sum(rate(sicurre_process_cpu_seconds_total{stack=\"sicurre-ml\"}[$__rate_interval]))", "legendFormat": "CPU cores", "refId": "A"}]
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Active metric series / 3,000",
+      "description": "ML allocation: warning at 2,100 and critical at 2,550 active series.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 8, "w": 4, "x": 16, "y": 48},
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 2100}, {"color": "red", "value": 2550}]}}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "area", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"expr": "count({stack=\"sicurre-ml\"})", "legendFormat": "Active series", "refId": "A"}]
+    },
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Samples per minute",
+      "description": "Approximate ML sample ingestion rate derived from Alloy remote-write delivery.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 8, "w": 4, "x": 20, "y": 48},
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "color": {"mode": "thresholds"}}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "area", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
+      "targets": [{"expr": "sum(rate(prometheus_remote_storage_samples_total{stack=\"sicurre-ml\",service_name=\"sicurre-ml-alloy\"}[5m])) * 60", "legendFormat": "Samples/min", "refId": "A"}]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "Telemetry delivery failures and discards",
+      "description": "Only failure/discard signals. A flat zero is healthy; non-zero values require investigation.",
+      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 56},
+      "fieldConfig": {"defaults": {"unit": "ops", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["sum", "max"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
-        {"expr": "sicurre_process_resident_memory_bytes{stack=\"sicurre-ml\"}", "legendFormat": "resident memory"},
-        {"expr": "rate(sicurre_process_cpu_seconds_total{stack=\"sicurre-ml\"}[5m])", "legendFormat": "CPU cores"}
-      ],
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 32}
-    },
-    {
-      "type": "stat", "title": "ML active series / 3,000", "id": 12,
-      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [{"expr": "count({stack=\"sicurre-ml\"})", "legendFormat": "active series"}],
-      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 2100}, {"color": "red", "value": 2550}]}}, "overrides": []},
-      "gridPos": {"h": 8, "w": 4, "x": 8, "y": 32}
-    },
-    {
-      "type": "stat", "title": "Samples per minute", "id": 13,
-      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [{"expr": "sum(rate({stack=\"sicurre-ml\"}[5m])) * 60", "legendFormat": "samples/min"}],
-      "gridPos": {"h": 8, "w": 4, "x": 12, "y": 32}
-    },
-    {
-      "type": "timeseries", "title": "Telemetry delivery and discards", "id": 14,
-      "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
-      "targets": [
-        {"expr": "sum(rate(loki_write_sent_bytes_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "Loki bytes/s"},
-        {"expr": "sum(rate(loki_write_dropped_bytes_total{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "Loki dropped bytes/s"},
-        {"expr": "sum(rate(otelcol_exporter_sent_spans{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "exported spans/s"},
-        {"expr": "sum(rate(otelcol_exporter_send_failed_spans{stack=\"sicurre-ml\"}[5m]))", "legendFormat": "failed spans/s"}
-      ],
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 32}
+        {"expr": "sum(rate(prometheus_remote_storage_samples_failed_total{stack=\"sicurre-ml\",service_name=\"sicurre-ml-alloy\"}[5m]))", "legendFormat": "Metric samples failed/s", "refId": "A"},
+        {"expr": "sum(rate(loki_write_dropped_entries_total{stack=\"sicurre-ml\",service_name=\"sicurre-ml-alloy\"}[5m]))", "legendFormat": "Log entries dropped/s", "refId": "B"},
+        {"expr": "sum(rate(otelcol_exporter_send_failed_spans{stack=\"sicurre-ml\",service_name=\"sicurre-ml-alloy\"}[5m])) or sum(rate(otelcol_exporter_send_failed_spans_total{stack=\"sicurre-ml\",service_name=\"sicurre-ml-alloy\"}[5m]))", "legendFormat": "Trace spans failed/s", "refId": "C"}
+      ]
     }
   ],
   "refresh": "1m",
   "schemaVersion": 40,
   "tags": ["sicurre-ml", "production", "inference"],
   "templating": {"list": []},
-  "time": {"from": "now-6h", "to": "now"},
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {"refresh_intervals": ["30s", "1m", "5m"], "time_options": ["1h", "6h", "24h", "2d", "7d", "30d"]},
   "timezone": "browser",
-  "title": "Sicurre ML Runtime",
+  "title": "Sicurre ML / Inference Command Center",
   "uid": "sicurre-ml-runtime",
-  "version": 1
+  "version": 2
 }
