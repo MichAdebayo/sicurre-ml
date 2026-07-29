@@ -17,6 +17,7 @@ from typing import Any
 from src.inference.blocklist import BlocklistResult, check_blocklists
 from src.inference.input_normalizer import CanonicalEmail, canonicalize_email
 from src.inference.llm_classifier import LLMResult, classify_llm
+from src.inference.mail_context import MailContext
 from src.inference.onnx_classifier import OnnxResult, classify_onnx
 from src.inference.rules import RuleResult, check_url_rules
 
@@ -177,12 +178,16 @@ def _timed_onnx(canonical: CanonicalEmail) -> tuple[OnnxResult, float]:
     return result, (time.perf_counter() - started) * 1000.0
 
 
-def _timed_llm(canonical: CanonicalEmail) -> tuple[LLMResult | None, float]:
+def _timed_llm(
+    canonical: CanonicalEmail,
+    mail_context: MailContext,
+) -> tuple[LLMResult | None, float]:
     started = time.perf_counter()
     result = classify_llm(
         canonical.body,
         sender=canonical.sender_domain,
         subject=canonical.subject,
+        mail_context=mail_context,
     )
     return result, (time.perf_counter() - started) * 1000.0
 
@@ -193,6 +198,7 @@ def run_pipeline(
     sender: str | None = None,
     use_virustotal: bool = False,
     use_llm: bool = True,
+    mail_context: MailContext | None = None,
 ) -> ClassificationResult:
     """Run canonicalization, semantic classification and phishing evidence fusion."""
 
@@ -203,6 +209,7 @@ def run_pipeline(
     threshold = _env_float("PHISHING_THRESHOLD", 0.5)
 
     canonical = canonicalize_email(text, subject=subject, sender=sender)
+    context = mail_context or MailContext()
     stage_latencies_ms: dict[str, float] = {}
     stage_scores: dict[str, float] = {}
     stage_labels: dict[str, str] = {}
@@ -222,7 +229,7 @@ def run_pipeline(
     )
     llm_future: Future[tuple[LLMResult | None, float]] | None = None
     if use_llm:
-        llm_future = _SEMANTIC_EXECUTOR.submit(_timed_llm, canonical)
+        llm_future = _SEMANTIC_EXECUTOR.submit(_timed_llm, canonical, context)
 
     started = time.perf_counter()
     rule_result: RuleResult = check_url_rules(canonical.security_text)
@@ -311,6 +318,44 @@ def run_pipeline(
         stage_distributions,
         {"onnx": w_onnx, "llm": w_llm},
     )
+    context_strength = 0.0
+    context_applied = False
+    max_context_phishing = _env_float("MAIL_CONTEXT_MAX_PHISHING_PROBABILITY", 0.20)
+    if (
+        context.structured_forward
+        and semantic_distribution["phishing"] <= max_context_phishing
+    ):
+        context_strength = min(
+            _env_float(
+                "MAIL_CONTEXT_AUTHENTICATED_FORWARD_STRENGTH"
+                if context.outer_sender_authenticated
+                else "MAIL_CONTEXT_FORWARD_STRENGTH",
+                0.70 if context.outer_sender_authenticated else 0.55,
+            ),
+            0.80,
+        )
+        transferred = semantic_distribution["spam"] * context_strength
+        semantic_distribution = _normalize_distribution(
+            {
+                "phishing": semantic_distribution["phishing"],
+                "spam": semantic_distribution["spam"] - transferred,
+                "legitimate": semantic_distribution["legitimate"] + transferred,
+            }
+        )
+        context_applied = True
+    stage_breakdown["mail_context"] = {
+        "active": context_applied,
+        "structured_forward": context.structured_forward,
+        "outer_sender_authenticated": context.outer_sender_authenticated,
+        "mailing_list_headers": context.mailing_list_headers,
+        "subscription_claimed": context.subscription_claimed,
+        "legitimacy_evidence": round(context_strength, 6),
+        "reason": (
+            "structured_forward"
+            if context_applied
+            else "insufficient_or_phishing_risk"
+        ),
+    }
     evidence = [
         (name, strength)
         for name, strength in (
