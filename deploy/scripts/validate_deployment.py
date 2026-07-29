@@ -6,7 +6,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 BASE_URL = os.getenv("INFERENCE_INTERNAL_URL", "http://app:8000").rstrip("/")
@@ -64,12 +64,21 @@ def _request(
 
 
 def _wait_for(path: str, expected_status: int, attempts: int) -> dict[str, Any]:
+    last_error: OSError | URLError | None = None
     for _ in range(attempts):
-        status, body, _ = _request(path)
+        try:
+            status, body, _ = _request(path)
+        except (OSError, URLError) as exc:
+            last_error = exc
+            time.sleep(5)
+            continue
         if status == expected_status:
             return body
         time.sleep(5)
-    raise RuntimeError(f"{path} did not return HTTP {expected_status}")
+    message = f"{path} did not return HTTP {expected_status}"
+    if last_error is not None:
+        raise RuntimeError(message) from last_error
+    raise RuntimeError(message)
 
 
 def main() -> None:
