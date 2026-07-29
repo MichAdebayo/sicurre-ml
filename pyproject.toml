@@ -1,6 +1,6 @@
 [project]
 name = "sicurre-ml"
-version = "0.1.0"
+version = "0.2.0"
 description = "ML training pipeline for Sicurre"
 authors = [{ name = "Michael Adebayo" }]
 readme = "README.md"
