@@ -67,6 +67,26 @@ _SYSTEM = textwrap.dedent(
     fournis sont des indices, pas une preuve. Ne reproduis aucune donnée
     personnelle du message dans l'explication.
 
+    Considère comme signaux forts de phishing, même dans un message poli et
+    contextualisé :
+    - une reconnexion Microsoft/messagerie ou une validation du compte
+      destinataire demandée par un portail externe ;
+    - un changement de RIB, de bénéficiaire ou d'instructions de paiement
+      demandé par email, surtout si une vérification normale est contournée ;
+    - la collecte de coordonnées bancaires, d'une pièce d'identité ou de
+      documents d'entreprise à la suite d'un contact inattendu ;
+    - un appel d'offres, une signature, un remboursement ou un document partagé
+      servant de prétexte à une authentification externe.
+    Un fil métier crédible, une signature complète, un avertissement « ignorer
+    si inconnu » ou une échéance réaliste ne neutralisent pas ces signaux.
+    À l'inverse, ne classe pas comme phishing un avis qui interdit explicitement
+    de modifier un bénéficiaire depuis l'email et exige une vérification par le
+    numéro habituel, ni un avis de sécurité sans lien qui demande d'ouvrir un
+    favori connu. Ces consignes hors bande réduisent réellement le risque.
+    Réserve uncertain aux messages réellement ambigus sans signal fort ; ne
+    l'utilise pas pour éviter une décision lorsqu'un vol d'identifiants ou une
+    fraude au paiement est explicitement décrit.
+
     Réponds uniquement avec un objet JSON valide :
     {
       "label": "phishing" | "spam" | "legitimate" | "uncertain",
@@ -114,7 +134,7 @@ def _call_mistral(
     return _openai_compatible(
         base_url="https://api.mistral.ai/v1",
         api_key=api_key,
-        model=os.getenv("MISTRAL_MODEL", "mistral-medium-latest"),
+        model=os.getenv("MISTRAL_MODEL", "mistral-medium-2604"),
         temperature=_env_float("MISTRAL_MODEL_TEMPERATURE", 0.0, minimum=0.0),
         text=text,
         sender=sender,

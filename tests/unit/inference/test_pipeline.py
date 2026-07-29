@@ -172,3 +172,22 @@ def test_missing_llm_is_explicitly_degraded(monkeypatch) -> None:
 
     assert result.degraded_reasons == ["llm_unavailable"]
     assert result.stage_breakdown["llm"]["active"] is False
+
+
+def test_uncertain_llm_distribution_is_shrunk_toward_neutral(monkeypatch) -> None:
+    from src.inference.pipeline import _distribution_from_result
+
+    monkeypatch.setenv("LLM_UNCERTAIN_EVIDENCE_FACTOR", "0.35")
+    result = _distribution_from_result(
+        LLMResult(
+            label="uncertain",
+            confidence=0.8,
+            explanation="Indices contradictoires.",
+            provider="mistral",
+            probabilities={"phishing": 0.1, "spam": 0.1, "legitimate": 0.8},
+        )
+    )
+
+    assert result["legitimate"] < 0.5
+    assert result["phishing"] > 0.2
+    assert round(sum(result.values()), 8) == 1.0

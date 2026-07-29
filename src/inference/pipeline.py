@@ -90,7 +90,23 @@ def _rounded_distribution(distribution: dict[str, float]) -> dict[str, float]:
 
 def _distribution_from_result(result: LLMResult) -> dict[str, float]:
     if result.probabilities:
-        return _normalize_distribution(result.probabilities)
+        distribution = _normalize_distribution(result.probabilities)
+        if result.label == "uncertain":
+            # An abstention may contain a directional hint, but it is not a
+            # full-strength semantic vote. Shrink it toward maximum entropy so
+            # it cannot overpower a decisive local classifier.
+            factor = min(
+                _env_float("LLM_UNCERTAIN_EVIDENCE_FACTOR", 0.35),
+                1.0,
+            )
+            uniform = 1.0 / len(_LABELS)
+            return _normalize_distribution(
+                {
+                    label: uniform + factor * (distribution[label] - uniform)
+                    for label in _LABELS
+                }
+            )
+        return distribution
     if result.label in _LABELS:
         confidence = min(max(result.confidence, 0.0), 1.0)
         residual = (1.0 - confidence) / 2.0
