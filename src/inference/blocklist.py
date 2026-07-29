@@ -11,8 +11,11 @@ from dataclasses import dataclass
 from urllib.parse import urlparse
 
 import httpx
+import tldextract
 
 from src.inference.phishtank_loader import get_phishtank_set  # noqa: E402
+
+_tldextract = tldextract.TLDExtract(suffix_list_urls=())
 
 # ---------------------------------------------------------------------------
 # French whitelist — domains that should never be flagged
@@ -90,15 +93,14 @@ class BlocklistResult:
 def _extract_domain(url: str) -> str:
     """Return the registered domain from a URL, e.g. 'paypal.com'."""
     try:
-        import tldextract
-        ext = tldextract.extract(url)
+        ext = _tldextract(url)
         if ext.domain and ext.suffix:
             return f"{ext.domain}.{ext.suffix}".lower()
     except Exception:
         pass
     # fallback
     parsed = urlparse(url)
-    return parsed.netloc.lower().lstrip("www.")
+    return parsed.netloc.lower().removeprefix("www.")
 
 
 def _extract_urls(text: str) -> list[str]:
