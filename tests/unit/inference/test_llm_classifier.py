@@ -13,7 +13,8 @@ def test_user_prompt_includes_sender_subject_and_text() -> None:
         subject="Action immediate requise",
     )
 
-    assert "Expéditeur: support@paypa1-security.com" in prompt
+    assert "Domaine expéditeur: paypa1-security.com" in prompt
+    assert "support@" not in prompt
     assert "Objet: Action immediate requise" in prompt
     assert "Merci de confirmer votre compte." in prompt
 
@@ -25,10 +26,14 @@ def test_classify_llm_forwards_sender_and_subject(monkeypatch) -> None:
         text: str,
         sender: str | None = None,
         subject: str | None = None,
+        *,
+        timeout_seconds: float | None = None,
     ) -> LLMResult:
         captured["text"] = text
         captured["sender"] = sender
         captured["subject"] = subject
+        assert timeout_seconds is not None
+        assert timeout_seconds > 0
         return LLMResult(
             label="phishing",
             confidence=0.85,
@@ -67,7 +72,10 @@ def test_resilient_post_retries_only_transient_statuses(monkeypatch) -> None:
     llm_classifier._circuit_failures.clear()
     llm_classifier._circuit_opened_at.clear()
     monkeypatch.setenv("LLM_MAX_ATTEMPTS", "2")
-    monkeypatch.setattr(llm_classifier.httpx, "post", fake_post)
+    class FakeClient:
+        post = staticmethod(fake_post)
+
+    monkeypatch.setattr(llm_classifier, "_http_client", lambda: FakeClient())
     monkeypatch.setattr(llm_classifier.time, "sleep", lambda _: None)
 
     response = llm_classifier._resilient_post(
@@ -91,7 +99,10 @@ def test_resilient_post_does_not_retry_permanent_client_error(monkeypatch) -> No
     llm_classifier._circuit_failures.clear()
     llm_classifier._circuit_opened_at.clear()
     monkeypatch.setenv("LLM_MAX_ATTEMPTS", "3")
-    monkeypatch.setattr(llm_classifier.httpx, "post", fake_post)
+    class FakeClient:
+        post = staticmethod(fake_post)
+
+    monkeypatch.setattr(llm_classifier, "_http_client", lambda: FakeClient())
 
     response = llm_classifier._resilient_post(
         "test-provider", "https://provider.test"

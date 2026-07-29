@@ -80,3 +80,23 @@ def test_classify_response_hides_internal_weight_fields(monkeypatch) -> None:
     assert "stage_contributions" not in body
     assert "applied_weight" not in body["stage_breakdown"]["onnx"]
     assert "contribution" not in body["stage_breakdown"]["onnx"]
+
+
+def test_public_stage_breakdown_drops_url_bearing_fields() -> None:
+    result = serving_app._public_stage_breakdown(
+        {
+            "rules": {
+                "active": True,
+                "reasons": ["Suspicious URL https://secret.example/path"],
+            },
+            "blocklist": {
+                "active": True,
+                "detail": "Exact match https://secret.example/path",
+            },
+        }
+    )
+
+    assert result == {
+        "rules": {"active": True},
+        "blocklist": {"active": True},
+    }
