@@ -144,7 +144,10 @@ def test_dashboard_is_an_inference_command_center() -> None:
     assert dashboard["title"] == "Sicurre ML / Inference Command Center"
     assert dashboard["time"]["from"] == "now-24h"
     assert len(dashboard["panels"]) >= 20
-    assert panels["Active model"]["options"]["textMode"] == "name"
+    assert panels["Active model revision"]["options"]["textMode"] == "name"
+    model_target = panels["Active model revision"]["targets"][0]
+    assert "display_version" in model_target["expr"]
+    assert "$1…$2" in model_target["expr"]
     assert panels["Inference process memory"]["fieldConfig"]["defaults"]["unit"] == "bytes"
     assert panels["Inference process CPU"]["fieldConfig"]["defaults"]["unit"] == "cores"
     assert "increase(sicurre_inference_label_total" in panels[
@@ -153,6 +156,9 @@ def test_dashboard_is_an_inference_command_center() -> None:
     assert "sicurre_inference_llm_provider_total" in panels["LLM provider usage"][
         "targets"
     ][0]["expr"]
+    samples_panel = panels["Sample delivery rate · informational"]
+    assert samples_panel["fieldConfig"]["defaults"]["color"]["fixedColor"] == "green"
+    assert "active series" in samples_panel["description"]
     assert "vector(0)" in panels["Degraded decisions"]["targets"][0]["expr"]
 
 

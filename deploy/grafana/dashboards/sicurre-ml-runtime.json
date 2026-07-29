@@ -64,13 +64,13 @@
     {
       "id": 5,
       "type": "stat",
-      "title": "Active model",
-      "description": "Semantic model identity currently exposed by the running inference service.",
+      "title": "Active model revision",
+      "description": "Model identity exposed by the running inference service. Long immutable revisions are shortened to the first 10 and final 8 characters for legibility; the complete revision remains in the deployment manifest and metric label.",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
       "gridPos": {"h": 5, "w": 8, "x": 0, "y": 5},
       "fieldConfig": {"defaults": {"color": {"mode": "fixed_color", "fixedColor": "blue"}}, "overrides": []},
       "options": {"colorMode": "value", "graphMode": "none", "textMode": "name", "wideLayout": true, "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
-      "targets": [{"expr": "max by (version) (sicurre_inference_model_info{stack=\"sicurre-ml\"})", "legendFormat": "{{version}}", "refId": "A"}]
+      "targets": [{"expr": "max by (display_version) (label_replace(sicurre_inference_model_info{stack=\"sicurre-ml\",version=~\".{19,}\"}, \"display_version\", \"$1…$2\", \"version\", \"^(.{10}).*(.{8})$\")) or max by (display_version) (label_replace(sicurre_inference_model_info{stack=\"sicurre-ml\",version=~\".{0,18}\"}, \"display_version\", \"$1\", \"version\", \"^(.*)$\"))", "legendFormat": "{{display_version}}", "refId": "A"}]
     },
     {
       "id": 6,
@@ -249,7 +249,7 @@
       "id": 22,
       "type": "stat",
       "title": "Active metric series / 3,000",
-      "description": "ML allocation: warning at 2,100 and critical at 2,550 active series.",
+      "description": "Current ML series cardinality, not a per-minute rate. The 3,000-series allocation warns at 2,100 (70%) and becomes critical at 2,550 (85%). Values below 2,100 are within the planned sustainable allocation.",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
       "gridPos": {"h": 8, "w": 4, "x": 16, "y": 48},
       "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 2100}, {"color": "red", "value": 2550}]}}, "overrides": []},
@@ -259,11 +259,11 @@
     {
       "id": 23,
       "type": "stat",
-      "title": "Samples per minute",
-      "description": "Approximate ML sample ingestion rate derived from Alloy remote-write delivery.",
+      "title": "Sample delivery rate · informational",
+      "description": "Approximate samples delivered per minute by Alloy. With the default 60-second scrape interval this normally tracks active-series count, so approximately 835 series produces approximately 835 samples/min. Grafana's ML allocation is governed here by active series, not by an independently defined samples/min ceiling.",
       "datasource": {"type": "prometheus", "uid": "__PROM_UID__"},
       "gridPos": {"h": 8, "w": 4, "x": 20, "y": 48},
-      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "color": {"mode": "thresholds"}}, "overrides": []},
+      "fieldConfig": {"defaults": {"unit": "short", "decimals": 0, "color": {"mode": "fixed", "fixedColor": "green"}}, "overrides": []},
       "options": {"colorMode": "value", "graphMode": "area", "textMode": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}},
       "targets": [{"expr": "sum(rate(prometheus_remote_storage_samples_total{stack=\"sicurre-ml\",service_name=\"sicurre-ml-alloy\"}[5m])) * 60", "legendFormat": "Samples/min", "refId": "A"}]
     },
