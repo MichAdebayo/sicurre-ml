@@ -181,7 +181,7 @@ class MailContextRequest(BaseModel):
 class ClassifyRequest(BaseModel):
     subject: str = Field(default="", max_length=500, description="Email subject")
     sender: str = Field(default="", max_length=320, description="Email sender address")
-    text: str = Field(..., min_length=1, max_length=10000, description="Email message body")
+    text: str = Field(..., min_length=1, max_length=5500, description="Email message body")
     use_virustotal: bool = Field(False, description="Enable VirusTotal enrichment (adds latency)")
     use_llm: bool = Field(True, description="Enable LLM stage")
     mail_context: MailContextRequest = Field(
