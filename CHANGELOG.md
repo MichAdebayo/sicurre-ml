@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.3.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.2.0...v0.3.0) (2026-08-06)
+
+
+### Features
+
+* **observability:** deploy ML inference command center ([05bf3a1](https://github.com/MichAdebayo/sicurre-ml/commit/05bf3a11157957191f9007d730cfc22b79d5b3f6))
+* **observability:** promote ML inference command center ([2dcdd07](https://github.com/MichAdebayo/sicurre-ml/commit/2dcdd07bd93f2921f38dc43ceea7294aa969fc51))
+* **observability:** rebuild ML inference command center ([fc921bd](https://github.com/MichAdebayo/sicurre-ml/commit/fc921bdd5393dcede8af4086222c728c91c892d3))
+* **observability:** rebuild ML inference dashboard ([b2acc0d](https://github.com/MichAdebayo/sicurre-ml/commit/b2acc0d8ab997fc62e43c361da23abcd3dbf8be8))
+
+
+### Bug Fixes
+
+* align production inference API contract ([9dea68e](https://github.com/MichAdebayo/sicurre-ml/commit/9dea68e64076758b153cf8f2d3e063477f7a07cf))
+* **api:** align inference payload contract ([e17013e](https://github.com/MichAdebayo/sicurre-ml/commit/e17013e12cff533fe087612c23dee5299d8cf021))
+* **ci:** promote bounded Docker cache handling ([0142403](https://github.com/MichAdebayo/sicurre-ml/commit/0142403680693d55426825dc178e6291d6f12bc5))
+* **ci:** release bounded Docker cache handling ([1ad899a](https://github.com/MichAdebayo/sicurre-ml/commit/1ad899ad1ef2c23b4910712e6f24138d062b9e13))
+* **ci:** tolerate exhausted build cache ([ca9a736](https://github.com/MichAdebayo/sicurre-ml/commit/ca9a736b90eac1489a5ec3160a6ff828bee6b683))
+* **ci:** tolerate exhausted build cache ([41b5ba6](https://github.com/MichAdebayo/sicurre-ml/commit/41b5ba67d695a8b736019698edaa837632ebb6ce))
+* **inference:** classify trusted forwards contextually ([7393430](https://github.com/MichAdebayo/sicurre-ml/commit/7393430d9aa097bcfc1c6bc1f5c7ec7a18c2c0c8))
+* **inference:** classify trusted forwards contextually ([3b08dc5](https://github.com/MichAdebayo/sicurre-ml/commit/3b08dc56e1d828dd2a2b0c9ae0312e79b3171e77))
+* **observability:** clarify ML telemetry budget signals ([26d239f](https://github.com/MichAdebayo/sicurre-ml/commit/26d239f038304b461b450a5b69404fd05e9a4023))
+* **observability:** clarify ML telemetry budget signals ([78342ae](https://github.com/MichAdebayo/sicurre-ml/commit/78342aeb23e1286bf608057b44ab52aa8d3c877c))
+* **observability:** clarify ML telemetry budget signals ([d3e3b6f](https://github.com/MichAdebayo/sicurre-ml/commit/d3e3b6f5fe0c6a8b1caf046aee5448f2613a09a3))
+* **observability:** clarify telemetry budget panels ([4a87a3c](https://github.com/MichAdebayo/sicurre-ml/commit/4a87a3c38aec3d2ee1308e5af6b5d537757e1df4))
+* promote forwarded-mail context handling ([3a0cdd0](https://github.com/MichAdebayo/sicurre-ml/commit/3a0cdd0d8c3f3ca0e1b64b3c210c6d8ee6254218))
+* release forwarded-mail context handling ([327c947](https://github.com/MichAdebayo/sicurre-ml/commit/327c9475b47d7e14b6b08a81932432be1a360d73))
+
 ## [0.2.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.1.0...v0.2.0) (2026-07-29)
 
 
