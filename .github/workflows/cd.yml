@@ -88,8 +88,10 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.tag.outputs.tag }}
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=production-image
+          # A full GitHub Actions cache must not turn a valid production image
+          # build into a failed deployment.
+          cache-to: type=gha,scope=production-image,mode=min,ignore-error=true
           build-args: |
             SERVICE_VERSION=${{ steps.tag.outputs.service_version }}
 
