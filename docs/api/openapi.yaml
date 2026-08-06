@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Sicurre Inference API
-  description: "Multi-stage phishing detection \u2014 rules + blocklist + ONNX + LLM"
+  description: Multi-stage phishing detection — rules + blocklist + ONNX + LLM
   version: 0.1.0
 paths:
   /v1/health:
@@ -70,7 +70,7 @@ paths:
       tags:
       - inference
       summary: Classify
-      description: Run the full phishing detection pipeline on the provided email payload.
+      description: Run the full phishing detection pipeline on the provided text.
       operationId: classify_v1_classify_post
       requestBody:
         content:
@@ -93,13 +93,30 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
       security:
       - HTTPBearer: []
+  /v1/manifest:
+    get:
+      tags:
+      - ops
+      summary: Manifest
+      operationId: manifest_v1_manifest_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                additionalProperties: true
+                type: object
+                title: Response Manifest V1 Manifest Get
+      security:
+      - HTTPBearer: []
 components:
   schemas:
     ClassifyRequest:
       properties:
         subject:
           type: string
-          maxLength: 300
+          maxLength: 500
           title: Subject
           description: Email subject
           default: ''
@@ -111,7 +128,7 @@ components:
           default: ''
         text:
           type: string
-          maxLength: 4096
+          maxLength: 5500
           minLength: 1
           title: Text
           description: Email message body
@@ -125,6 +142,10 @@ components:
           title: Use Llm
           description: Enable LLM stage
           default: true
+        mail_context:
+          $ref: '#/components/schemas/MailContextRequest'
+          description: Bounded gateway-derived context; never raw headers or user
+            content
       type: object
       required:
       - text
@@ -170,6 +191,14 @@ components:
         llm_provider:
           type: string
           title: Llm Provider
+        degraded_reasons:
+          items:
+            type: string
+          type: array
+          title: Degraded Reasons
+        input_format:
+          type: string
+          title: Input Format
       type: object
       required:
       - verdict
@@ -182,6 +211,8 @@ components:
       - stage_breakdown
       - explanation
       - llm_provider
+      - degraded_reasons
+      - input_format
       title: ClassifyResponse
     HTTPValidationError:
       properties:
@@ -192,6 +223,27 @@ components:
           title: Detail
       type: object
       title: HTTPValidationError
+    MailContextRequest:
+      properties:
+        structured_forward:
+          type: boolean
+          title: Structured Forward
+          default: false
+        outer_sender_authenticated:
+          type: boolean
+          title: Outer Sender Authenticated
+          default: false
+        mailing_list_headers:
+          type: boolean
+          title: Mailing List Headers
+          default: false
+        subscription_claimed:
+          type: boolean
+          title: Subscription Claimed
+          default: false
+      type: object
+      title: MailContextRequest
+      description: Privacy-safe transport evidence derived by the authorized gateway.
     ValidationError:
       properties:
         loc:
