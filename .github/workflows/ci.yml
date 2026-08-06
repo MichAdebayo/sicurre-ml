@@ -110,8 +110,11 @@ jobs:
           load: true
           tags: sicurre-ml:ci-check
           # Use GitHub Actions cache to speed up repeated builds
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=ci-image
+          # Cache capacity is an optimization, never a correctness gate. Keep
+          # only the final-stage cache and continue when GitHub cannot reserve
+          # additional cache storage.
+          cache-to: type=gha,scope=ci-image,mode=min,ignore-error=true
 
       - name: Scan container image for high and critical vulnerabilities
         uses: aquasecurity/trivy-action@v0.36.0
