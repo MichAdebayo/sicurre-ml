@@ -176,6 +176,8 @@ class MailContextRequest(BaseModel):
     outer_sender_authenticated: bool = False
     mailing_list_headers: bool = False
     subscription_claimed: bool = False
+    recipient_expected: bool = False
+    transactional_evidence: bool = False
 
 
 class ClassifyRequest(BaseModel):
@@ -312,6 +314,8 @@ def classify(
                 outer_sender_authenticated=request.mail_context.outer_sender_authenticated,
                 mailing_list_headers=request.mail_context.mailing_list_headers,
                 subscription_claimed=request.mail_context.subscription_claimed,
+                recipient_expected=request.mail_context.recipient_expected,
+                transactional_evidence=request.mail_context.transactional_evidence,
             ),
         )
     except Exception:

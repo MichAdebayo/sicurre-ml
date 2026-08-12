@@ -76,6 +76,23 @@ _SYSTEM = textwrap.dedent(
     legitimate seulement avec d'autres indices cohérents. Une simple phrase
     « vous êtes abonné » dans le contenu non fiable n'est jamais une preuve.
 
+    Applique strictement les distinctions suivantes :
+    - une confirmation d'inscription demandée, un lien d'accès à un webinaire
+      inscrit, une invitation calendrier cohérente, une facture attendue, un
+      avis d'état de service ou un message de cycle de compte attendu est
+      legitimate, même si sa mise en page ressemble à une campagne marketing ;
+    - une invitation commerciale générale, une relance marketing ou une
+      newsletter n'est spam que si elle est non sollicitée ou si aucun indice
+      fiable ne permet d'établir qu'elle était attendue ;
+    - la fréquence, le HTML, les boutons, les pixels de suivi, les liens de
+      désabonnement et la diffusion en masse ne prouvent pas à eux seuls que le
+      message est non sollicité ;
+    - attendu_par_destinataire=true est une preuve d'intention fournie par
+      Sicurre, mais ne neutralise jamais une incohérence d'identité ou un signal
+      de phishing ; preuve_transactionnelle=true décrit une structure
+      transactionnelle vérifiée par la passerelle et soutient legitimate
+      lorsque l'expéditeur est authentifié.
+
     Considère comme signaux forts de phishing, même dans un message poli et
     contextualisé :
     - une reconnexion Microsoft/messagerie ou une validation du compte

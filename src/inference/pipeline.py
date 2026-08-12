@@ -192,6 +192,35 @@ def _timed_llm(
     return result, (time.perf_counter() - started) * 1000.0
 
 
+def _mail_context_legitimacy_strength(context: MailContext) -> tuple[float, str]:
+    """Return bounded spam-to-legitimate evidence without reducing phishing risk."""
+
+    if context.recipient_expected and context.outer_sender_authenticated:
+        return (
+            min(_env_float("MAIL_CONTEXT_EXPECTED_STRENGTH", 0.80), 0.85),
+            "authenticated_recipient_expectation",
+        )
+    if context.transactional_evidence and context.outer_sender_authenticated:
+        return (
+            min(_env_float("MAIL_CONTEXT_TRANSACTIONAL_STRENGTH", 0.65), 0.75),
+            "authenticated_transactional_evidence",
+        )
+    if context.structured_forward:
+        return (
+            min(
+                _env_float(
+                    "MAIL_CONTEXT_AUTHENTICATED_FORWARD_STRENGTH"
+                    if context.outer_sender_authenticated
+                    else "MAIL_CONTEXT_FORWARD_STRENGTH",
+                    0.70 if context.outer_sender_authenticated else 0.55,
+                ),
+                0.80,
+            ),
+            "structured_forward",
+        )
+    return 0.0, "insufficient_context"
+
+
 def run_pipeline(
     text: str,
     subject: str | None = None,
@@ -318,22 +347,10 @@ def run_pipeline(
         stage_distributions,
         {"onnx": w_onnx, "llm": w_llm},
     )
-    context_strength = 0.0
+    context_strength, context_reason = _mail_context_legitimacy_strength(context)
     context_applied = False
     max_context_phishing = _env_float("MAIL_CONTEXT_MAX_PHISHING_PROBABILITY", 0.20)
-    if (
-        context.structured_forward
-        and semantic_distribution["phishing"] <= max_context_phishing
-    ):
-        context_strength = min(
-            _env_float(
-                "MAIL_CONTEXT_AUTHENTICATED_FORWARD_STRENGTH"
-                if context.outer_sender_authenticated
-                else "MAIL_CONTEXT_FORWARD_STRENGTH",
-                0.70 if context.outer_sender_authenticated else 0.55,
-            ),
-            0.80,
-        )
+    if context_strength > 0.0 and semantic_distribution["phishing"] <= max_context_phishing:
         transferred = semantic_distribution["spam"] * context_strength
         semantic_distribution = _normalize_distribution(
             {
@@ -349,11 +366,13 @@ def run_pipeline(
         "outer_sender_authenticated": context.outer_sender_authenticated,
         "mailing_list_headers": context.mailing_list_headers,
         "subscription_claimed": context.subscription_claimed,
+        "recipient_expected": context.recipient_expected,
+        "transactional_evidence": context.transactional_evidence,
         "legitimacy_evidence": round(context_strength, 6),
         "reason": (
-            "structured_forward"
+            context_reason
             if context_applied
-            else "insufficient_or_phishing_risk"
+            else "phishing_risk" if context_strength > 0.0 else context_reason
         ),
     }
     evidence = [
