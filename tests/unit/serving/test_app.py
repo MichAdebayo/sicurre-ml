@@ -71,6 +71,8 @@ def test_classify_response_hides_internal_weight_fields(monkeypatch) -> None:
                 "outer_sender_authenticated": True,
                 "mailing_list_headers": False,
                 "subscription_claimed": True,
+                "recipient_expected": True,
+                "transactional_evidence": True,
             },
         },
     )
@@ -86,6 +88,8 @@ def test_classify_response_hides_internal_weight_fields(monkeypatch) -> None:
             structured_forward=True,
             outer_sender_authenticated=True,
             subscription_claimed=True,
+            recipient_expected=True,
+            transactional_evidence=True,
         ),
     }
 
