@@ -241,6 +241,14 @@ components:
           type: boolean
           title: Subscription Claimed
           default: false
+        recipient_expected:
+          type: boolean
+          title: Recipient Expected
+          default: false
+        transactional_evidence:
+          type: boolean
+          title: Transactional Evidence
+          default: false
       type: object
       title: MailContextRequest
       description: Privacy-safe transport evidence derived by the authorized gateway.

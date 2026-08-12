@@ -29,12 +29,22 @@ def test_user_prompt_separates_gateway_context_from_untrusted_content() -> None:
             structured_forward=True,
             outer_sender_authenticated=True,
             subscription_claimed=True,
+            recipient_expected=True,
+            transactional_evidence=True,
         ),
     )
 
     assert prompt.index("<CONTEXTE_PASSERELLE>") < prompt.index("<EMAIL_NON_FIABLE>")
     assert "transfert_structure=true" in prompt
     assert "expediteur_externe_authentifie=true" in prompt
+    assert "attendu_par_destinataire=true" in prompt
+    assert "preuve_transactionnelle=true" in prompt
+
+
+def test_system_prompt_does_not_equate_bulk_format_with_spam() -> None:
+    assert "confirmation d'inscription demandée" in llm_classifier._SYSTEM
+    assert "désabonnement" in llm_classifier._SYSTEM
+    assert "ne prouvent pas à eux seuls" in llm_classifier._SYSTEM
 
 
 def test_classify_llm_forwards_sender_and_subject(monkeypatch) -> None:

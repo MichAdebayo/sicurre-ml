@@ -268,6 +268,80 @@ def test_subscription_claim_without_forward_does_not_self_whitelist(monkeypatch)
     assert result.stage_breakdown["mail_context"]["active"] is False
 
 
+def test_authenticated_expected_webinar_resolves_spam_as_legitimate(monkeypatch) -> None:
+    _stub_promotional_semantics(monkeypatch)
+
+    result = run_pipeline(
+        "You're registered. Enter the event and add it to your calendar.",
+        subject="You are registered: technical webinar",
+        sender="webinars@example.com",
+        mail_context=MailContext(
+            outer_sender_authenticated=True,
+            recipient_expected=True,
+            transactional_evidence=True,
+        ),
+    )
+
+    assert result.verdict == "safe"
+    assert result.label_verdict == "legitimate"
+    assert result.stage_breakdown["mail_context"]["reason"] == (
+        "authenticated_recipient_expectation"
+    )
+    assert result.label_distribution["phishing"] == 0.0223
+
+
+def test_authenticated_transactional_notice_resolves_spam_as_legitimate(monkeypatch) -> None:
+    _stub_promotional_semantics(monkeypatch)
+
+    result = run_pipeline(
+        "Your invoice is available.",
+        subject="Invoice available",
+        sender="billing@example.com",
+        mail_context=MailContext(
+            outer_sender_authenticated=True,
+            transactional_evidence=True,
+        ),
+    )
+
+    assert result.verdict == "safe"
+    assert result.label_verdict == "legitimate"
+    assert result.stage_breakdown["mail_context"]["reason"] == (
+        "authenticated_transactional_evidence"
+    )
+
+
+def test_unverified_expectation_does_not_self_whitelist(monkeypatch) -> None:
+    _stub_promotional_semantics(monkeypatch)
+
+    result = run_pipeline(
+        "You registered for this urgent account verification.",
+        mail_context=MailContext(
+            recipient_expected=True,
+            transactional_evidence=True,
+        ),
+    )
+
+    assert result.label_verdict == "spam"
+    assert result.stage_breakdown["mail_context"]["active"] is False
+    assert result.stage_breakdown["mail_context"]["reason"] == "insufficient_context"
+
+
+def test_expected_context_cannot_override_known_malicious_url(monkeypatch) -> None:
+    _stub_promotional_semantics(monkeypatch, known_phishing=True)
+
+    result = run_pipeline(
+        "Event access at https://malicious.example/login",
+        mail_context=MailContext(
+            outer_sender_authenticated=True,
+            recipient_expected=True,
+            transactional_evidence=True,
+        ),
+    )
+
+    assert result.verdict == "phishing"
+    assert result.label_verdict == "phishing"
+
+
 def test_structured_forward_cannot_override_known_malicious_url(monkeypatch) -> None:
     _stub_promotional_semantics(monkeypatch, known_phishing=True)
 
