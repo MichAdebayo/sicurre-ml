@@ -24,9 +24,33 @@ from src.inference.rules import RuleResult, check_url_rules
 _LABELS = ("phishing", "spam", "legitimate")
 _DEFAULT_RULE_WEIGHT = 0.10
 _DEFAULT_BLOCKLIST_WEIGHT = 0.25
-_SEMANTIC_EXECUTOR = ThreadPoolExecutor(
-    max_workers=2,
-    thread_name_prefix="sicurre-semantic",
+
+
+def _pool_size(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+    return max(value, 1)
+
+
+# The two semantic stages have opposite characters and must not share a pool.
+#
+# A single shared pool of two workers meant one in-flight request saturated it:
+# each request submits both an ONNX task and an LLM task, so a second concurrent
+# scan could not start its local inference until the first request's ~1s LLM
+# call had returned. That serialised the service at a concurrency of one.
+#
+# ONNX is CPU-bound, so its pool is sized by cores. The LLM call is almost
+# entirely spent waiting on a socket, so its pool is sized for concurrent
+# requests and bounded by the HTTP connection limit rather than by CPU.
+_ONNX_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_pool_size("ONNX_POOL_WORKERS", max((os.cpu_count() or 2) - 1, 1)),
+    thread_name_prefix="sicurre-onnx",
+)
+_LLM_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_pool_size("LLM_POOL_WORKERS", 16),
+    thread_name_prefix="sicurre-llm",
 )
 
 
@@ -53,7 +77,8 @@ class ClassificationResult:
 def close_pipeline_resources() -> None:
     """Release shared inference worker threads during process shutdown."""
 
-    _SEMANTIC_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+    _ONNX_EXECUTOR.shutdown(wait=False, cancel_futures=True)
+    _LLM_EXECUTOR.shutdown(wait=False, cancel_futures=True)
 
 
 def _env_float(name: str, default: float) -> float:
@@ -252,13 +277,13 @@ def run_pipeline(
     }
     degraded_reasons: list[str] = []
 
-    onnx_future: Future[tuple[OnnxResult, float]] = _SEMANTIC_EXECUTOR.submit(
+    onnx_future: Future[tuple[OnnxResult, float]] = _ONNX_EXECUTOR.submit(
         _timed_onnx,
         canonical,
     )
     llm_future: Future[tuple[LLMResult | None, float]] | None = None
     if use_llm:
-        llm_future = _SEMANTIC_EXECUTOR.submit(_timed_llm, canonical, context)
+        llm_future = _LLM_EXECUTOR.submit(_timed_llm, canonical, context)
 
     started = time.perf_counter()
     rule_result: RuleResult = check_url_rules(canonical.security_text)
