@@ -43,17 +43,27 @@ def _required_env(name: str) -> str:
     return value
 
 
-def _decode(raw: bytes) -> dict[str, Any]:
-    """Parse a Grafana body, tolerating the HTML a gateway may return."""
+def _decode(raw: bytes) -> Any:
+    """Parse a Grafana body, tolerating the HTML a gateway may return.
+
+    The shape is preserved: several endpoints answer with a JSON array, and
+    coercing those into a dict silently breaks every caller that iterates them.
+    """
     if not raw:
         return {}
     try:
-        parsed = json.loads(raw)
+        return json.loads(raw)
     except ValueError:
         # A waking instance or proxy can answer with HTML. Keep the text so the
         # surfaced error describes the real failure, not a JSON parse error.
         return {"message": raw.decode("utf-8", "replace")[:200]}
-    return parsed if isinstance(parsed, dict) else {"body": parsed}
+
+
+def _error_message(body: Any) -> str:
+    """Extract an error message from a body of any shape."""
+    if isinstance(body, dict):
+        return str(body.get("message", "unknown Grafana API error"))
+    return "unknown Grafana API error"
 
 
 def _request(
@@ -86,9 +96,7 @@ def _request(
             status = exc.code
             body = _decode(exc.read())
             if status in RETRYABLE_STATUSES:
-                transient_reason = (
-                    f"HTTP {status}: {body.get('message', 'provider not ready')}"
-                )
+                transient_reason = f"HTTP {status}: {_error_message(body)}"
         except URLError as exc:
             # DNS, connection reset and timeouts are worth repeating.
             status = 0
@@ -97,9 +105,9 @@ def _request(
 
         if transient_reason is None:
             if status not in accepted:
-                message = body.get("message", "unknown Grafana API error")
                 raise RuntimeError(
-                    f"{method} {endpoint} failed with HTTP {status}: {message}"
+                    f"{method} {endpoint} failed with HTTP {status}: "
+                    f"{_error_message(body)}"
                 )
             return status, body
 
