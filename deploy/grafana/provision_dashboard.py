@@ -37,10 +37,40 @@ def _retry_delay_seconds(attempt: int) -> float:
 
 
 def _required_env(name: str) -> str:
-    value = os.getenv(name, "").strip()
+    """Read a required value, tolerating how the env file was written.
+
+    CD passes `deploy/env.alloy` to `docker run --env-file`, which does not
+    strip surrounding quotes or trailing whitespace the way shell sourcing
+    does. A token written as `TOKEN="glsa_x"` therefore reached Grafana with
+    literal quotes attached and produced HTTP 401, while the identical value
+    authenticated fine in the sibling repository that sources the same file
+    through a shell.
+    """
+    value = os.getenv(name, "").strip().strip("\"'").strip()
     if not value:
         raise RuntimeError(f"{name} is required")
     return value
+
+
+def _verify_credentials(grafana_url: str, token: str) -> None:
+    """Prove the token authenticates before doing any provisioning work.
+
+    The CD precheck only asserts that the variable is non-empty, so a
+    malformed token passes validation and fails a few hundred lines later,
+    after a full build and deploy. A side-effect-free call surfaces it in
+    seconds and distinguishes a bad credential from an unavailable Grafana.
+    """
+    try:
+        _request(grafana_url, token, "/api/org")
+    except RuntimeError as exc:
+        if "HTTP 401" in str(exc) or "HTTP 403" in str(exc):
+            raise RuntimeError(
+                "GRAFANA_SERVICE_ACCOUNT_TOKEN was rejected by Grafana "
+                f"({exc}). Check deploy/env.alloy for stray quotes or "
+                "whitespace around the value, then confirm the service "
+                "account is still enabled."
+            ) from exc
+        raise
 
 
 def _decode(raw: bytes) -> Any:
@@ -248,6 +278,8 @@ def main() -> None:
     alert_path = dashboard_path.parent.parent / "alerts" / "sicurre-ml-alerts.json"
     grafana_url = _required_env("GRAFANA_URL")
     token = _required_env("GRAFANA_SERVICE_ACCOUNT_TOKEN")
+
+    _verify_credentials(grafana_url, token)
 
     _, datasource = _request(
         grafana_url,

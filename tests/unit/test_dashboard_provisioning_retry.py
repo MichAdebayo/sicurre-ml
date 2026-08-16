@@ -174,3 +174,71 @@ def test_list_bodies_keep_their_shape() -> None:
     ]
     assert provision._error_message([{"uid": "a"}]) == "unknown Grafana API error"
     assert provision._error_message({"message": "boom"}) == "boom"
+
+
+@pytest.mark.parametrize(
+    "written",
+    ['glsa_token', '"glsa_token"', "'glsa_token'", ' glsa_token ', '"glsa_token" '],
+)
+def test_token_is_normalised_however_the_env_file_was_written(
+    monkeypatch: pytest.MonkeyPatch, written: str
+) -> None:
+    """`docker run --env-file` does not strip quotes or whitespace.
+
+    An identical token authenticated in the repository that shell-sources the
+    same file and returned HTTP 401 in the one that passes it to Docker, which
+    is what failed CD run 31942804573.
+    """
+    monkeypatch.setenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", written)
+
+    assert provision._required_env("GRAFANA_SERVICE_ACCOUNT_TOKEN") == "glsa_token"
+
+
+def test_missing_token_still_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", '""')
+
+    with pytest.raises(RuntimeError, match="is required"):
+        provision._required_env("GRAFANA_SERVICE_ACCOUNT_TOKEN")
+
+
+def test_preflight_reports_a_rejected_credential_clearly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Surface the cause in seconds instead of after a full deploy."""
+
+    def fake_urlopen(request, timeout=30):  # noqa: ARG001
+        error = HTTPError(url="x", code=401, msg="Unauthorized", hdrs=Message(), fp=None)
+        error.read = lambda: b'{"message":"Unauthorized"}'  # type: ignore[method-assign]
+        raise error
+
+    monkeypatch.setattr(provision, "urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError, match="stray quotes or whitespace"):
+        provision._verify_credentials("https://grafana.test", "bad-token")
+
+
+def test_preflight_passes_a_working_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        provision, "urlopen", lambda *_, **__: _Response(b'{"id":1,"name":"Main Org."}')
+    )
+
+    provision._verify_credentials("https://grafana.test", "glsa_good")
+
+
+def test_preflight_does_not_mask_an_unavailable_grafana(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A waking instance is a retry case, not a credential problem."""
+    attempts: list[int] = []
+
+    def fake_urlopen(request, timeout=30):  # noqa: ARG001
+        attempts.append(1)
+        error = _loading_error()
+        error.read = lambda: b'{"message":"still loading"}'  # type: ignore[method-assign]
+        raise error
+
+    monkeypatch.setattr(provision, "urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError, match="after 6 attempts"):
+        provision._verify_credentials("https://grafana.test", "glsa_good")
+    assert len(attempts) == provision.MAX_ATTEMPTS
