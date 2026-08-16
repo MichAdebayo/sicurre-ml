@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from email.message import Message
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 
@@ -52,7 +53,7 @@ def _loading_error() -> HTTPError:
         url="https://grafana.test/api/datasources/name/grafanacloud-sicurre-prom",
         code=503,
         msg="Service Unavailable",
-        hdrs=None,
+        hdrs=Message(),
         fp=None,
     )
 
@@ -103,7 +104,7 @@ def test_auth_failure_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
 
     def fake_urlopen(request, timeout=30):  # noqa: ARG001
         attempts.append(1)
-        error = HTTPError(url="x", code=401, msg="Unauthorized", hdrs=None, fp=None)
+        error = HTTPError(url="x", code=401, msg="Unauthorized", hdrs=Message(), fp=None)
         error.read = lambda: b'{"message":"invalid API key"}'  # type: ignore[method-assign]
         raise error
 
