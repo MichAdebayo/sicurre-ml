@@ -159,3 +159,18 @@ def test_non_json_error_body_does_not_mask_the_failure(
         "message": "<html>502 Bad Gateway</html>"
     }
     assert provision._decode(b"") == {}
+
+
+def test_list_bodies_keep_their_shape() -> None:
+    """`/api/datasources` answers with an array.
+
+    Coercing it into a dict made every caller that iterates the response walk
+    dict keys instead, which is what broke CD run 31942362873 with
+    "'str' object has no attribute 'get'".
+    """
+    assert provision._decode(b'[{"uid":"a"},{"uid":"b"}]') == [
+        {"uid": "a"},
+        {"uid": "b"},
+    ]
+    assert provision._error_message([{"uid": "a"}]) == "unknown Grafana API error"
+    assert provision._error_message({"message": "boom"}) == "boom"
