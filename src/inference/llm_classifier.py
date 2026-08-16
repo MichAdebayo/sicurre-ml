@@ -17,6 +17,7 @@ import os
 import random
 import textwrap
 import time
+from collections import Counter
 from dataclasses import dataclass, field
 from functools import lru_cache
 from threading import Lock
@@ -366,7 +367,20 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+_provider_events: Counter[tuple[str, str]] = Counter()
+_provider_events_lock = Lock()
+
+
 def _emit_provider_event(provider: str, category: str) -> None:
+    """Record a provider outcome as both a log line and a countable metric.
+
+    The log alone cannot answer "which provider is failing, and how often" in
+    Grafana, which is the question that decides provider ordering and timeouts.
+    Cardinality stays bounded: providers and categories are both closed sets.
+    """
+
+    with _provider_events_lock:
+        _provider_events[(provider, category)] += 1
     print(
         json.dumps(
             {"event": "llm_provider", "provider": provider, "category": category},
@@ -374,6 +388,13 @@ def _emit_provider_event(provider: str, category: str) -> None:
         ),
         flush=True,
     )
+
+
+def provider_event_snapshot() -> dict[tuple[str, str], int]:
+    """Return a copy of provider outcome counts for the metrics endpoint."""
+
+    with _provider_events_lock:
+        return dict(_provider_events)
 
 
 def _exception_category(exc: Exception) -> str:
@@ -442,7 +463,10 @@ def _resilient_post(
         raise RuntimeError("LLM provider circuit is open")
 
     attempts = _env_int("LLM_MAX_ATTEMPTS", 1)
-    configured_response = _env_float("LLM_PROVIDER_TIMEOUT_SECONDS", 4.5)
+    # Measured median provider latency is ~1.1s, so a 4.5s ceiling never
+    # helps a healthy call: it only delays failover on a stalled one, which
+    # is what inflated the p95/p99 tail. Fail over sooner instead.
+    configured_response = _env_float("LLM_PROVIDER_TIMEOUT_SECONDS", 2.5)
     response_timeout = min(timeout_seconds or configured_response, configured_response)
     connect_timeout = min(
         _env_float("LLM_CONNECT_TIMEOUT_SECONDS", 1.0),
@@ -513,6 +537,9 @@ def classify_llm(
             timeout_seconds=remaining,
         )
         if result is not None:
+            # Counted as well as logged: without a success count the failure
+            # counts below have no denominator.
+            _emit_provider_event(result.provider, "selected")
             print(
                 json.dumps(
                     {
