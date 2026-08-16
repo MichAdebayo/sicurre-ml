@@ -20,6 +20,25 @@ def _sanitize_distribution(distribution: dict[str, float]) -> dict[str, float]:
     labels = ("phishing", "spam", "legitimate")
     return {label: float(distribution.get(label, 0.0)) for label in labels}
 
+# Stages that emit a semantic three-class opinion. Rules and blocklists produce
+# phishing evidence only, so they have no label to compare.
+_SEMANTIC_STAGES = ("onnx", "llm")
+
+
+def _provider_outcomes() -> dict[tuple[str, str], int]:
+    """Read provider outcome counts without inverting the module layering.
+
+    Imported lazily so `src.inference` never has to depend on `src.serving`.
+    """
+
+    try:
+        from src.inference.llm_classifier import provider_event_snapshot
+
+        return provider_event_snapshot()
+    except Exception:  # pragma: no cover - metrics must never break the endpoint
+        return {}
+
+
 
 @dataclass
 class RuntimeTelemetry:
@@ -41,6 +60,12 @@ class RuntimeTelemetry:
     stage_latency_ms_count: Counter[str] = field(default_factory=Counter)
     stage_latency_ms_max: dict[str, float] = field(default_factory=dict)
     label_distribution_total: dict[str, float] = field(default_factory=dict)
+    # (stage, label) -> count. Bounded: 2 semantic stages x 4 labels.
+    stage_label_total: Counter[tuple[str, str]] = field(default_factory=Counter)
+    # (onnx_label, llm_label) -> count. Bounded: 4 x 4. This is the signal that
+    # shows whether the local model and the LLM actually disagree, which is what
+    # should drive the fusion weights rather than intuition.
+    stage_agreement_total: Counter[tuple[str, str]] = field(default_factory=Counter)
     total_latency_buckets: Counter[float] = field(default_factory=Counter)
     mode_latency_buckets: Counter[tuple[str, float]] = field(default_factory=Counter)
     mode_latency_sum: dict[str, float] = field(default_factory=dict)
@@ -55,6 +80,7 @@ class RuntimeTelemetry:
         label_verdict: str | None = None,
         label_distribution: dict[str, float] | None = None,
         stage_latencies_ms: dict[str, float] | None = None,
+        stage_labels: dict[str, str] | None = None,
         llm_provider: str | None = None,
         error_type: str | None = None,
         mode: str = "unknown",
@@ -94,6 +120,15 @@ class RuntimeTelemetry:
                     self.label_distribution_total[label] = (
                         self.label_distribution_total.get(label, 0.0) + value
                     )
+
+            if stage_labels:
+                for stage, stage_label in stage_labels.items():
+                    if stage in _SEMANTIC_STAGES:
+                        self.stage_label_total[(stage, stage_label)] += 1
+                onnx_label = stage_labels.get("onnx")
+                llm_label = stage_labels.get("llm")
+                if onnx_label and llm_label:
+                    self.stage_agreement_total[(onnx_label, llm_label)] += 1
 
             if stage_latencies_ms:
                 for stage, stage_latency in stage_latencies_ms.items():
@@ -167,6 +202,21 @@ class RuntimeTelemetry:
                 f'sicurre_inference_llm_provider_total{{provider="{provider}"}} {count}'
                 for provider, count in sorted(self.llm_provider_total.items())
             ]
+            stage_label_lines = [
+                f'sicurre_inference_stage_label_total{{stage="{stage}",label="{label}"}} {count}'
+                for (stage, label), count in sorted(self.stage_label_total.items())
+            ]
+            stage_agreement_lines = [
+                "sicurre_inference_stage_agreement_total"
+                f'{{onnx_label="{onnx_label}",llm_label="{llm_label}",'
+                f'agreement="{"agree" if onnx_label == llm_label else "disagree"}"}} {count}'
+                for (onnx_label, llm_label), count in sorted(self.stage_agreement_total.items())
+            ]
+            provider_outcome_lines = [
+                "sicurre_inference_llm_provider_outcome_total"
+                f'{{provider="{provider}",category="{category}"}} {count}'
+                for (provider, category), count in sorted(_provider_outcomes().items())
+            ]
             error_lines = [
                 f'sicurre_inference_error_total{{error_type="{error_type}"}} {count}'
                 for error_type, count in sorted(self.error_total.items())
@@ -233,6 +283,18 @@ class RuntimeTelemetry:
                 '# HELP sicurre_inference_llm_provider_total LLM provider usage counts.',
                 '# TYPE sicurre_inference_llm_provider_total counter',
                 *llm_provider_lines,
+                '# HELP sicurre_inference_llm_provider_outcome_total '
+                'LLM provider outcomes by category, including failures.',
+                '# TYPE sicurre_inference_llm_provider_outcome_total counter',
+                *provider_outcome_lines,
+                '# HELP sicurre_inference_stage_label_total '
+                'Predicted label counts per semantic stage.',
+                '# TYPE sicurre_inference_stage_label_total counter',
+                *stage_label_lines,
+                '# HELP sicurre_inference_stage_agreement_total '
+                'Local model versus LLM label pairs, for fusion weight tuning.',
+                '# TYPE sicurre_inference_stage_agreement_total counter',
+                *stage_agreement_lines,
                 '# HELP sicurre_inference_error_total Runtime error counts.',
                 '# TYPE sicurre_inference_error_total counter',
                 *error_lines,
@@ -291,6 +353,7 @@ def emit_classify_request_log(
     label_verdict: str | None = None,
     label_distribution: dict[str, float] | None = None,
     stage_latencies_ms: dict[str, float] | None = None,
+    stage_labels: dict[str, str] | None = None,
     llm_provider: str | None = None,
     model_version: str | None = None,
     error_type: str | None = None,
@@ -338,6 +401,7 @@ def observe_classify_request(
     label_verdict: str | None = None,
     label_distribution: dict[str, float] | None = None,
     stage_latencies_ms: dict[str, float] | None = None,
+    stage_labels: dict[str, str] | None = None,
     llm_provider: str | None = None,
     model_version: str | None = None,
     error_type: str | None = None,
@@ -350,6 +414,7 @@ def observe_classify_request(
         label_verdict=label_verdict,
         label_distribution=label_distribution,
         stage_latencies_ms=stage_latencies_ms,
+        stage_labels=stage_labels,
         llm_provider=llm_provider,
         error_type=error_type,
         mode=mode,
