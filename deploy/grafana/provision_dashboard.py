@@ -6,14 +6,34 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 FOLDER_UID = "sicurre-ml"
 FOLDER_TITLE = "Sicurre ML"
 PROMETHEUS_DATASOURCE = "grafanacloud-sicurre-prom"
+
+# Grafana Cloud suspends idle free-tier instances and answers
+# `503 {"code":"Loading"}` while one wakes. CD run 31937993160 deployed, health
+# checked, and validated telemetry successfully, then failed here on exactly
+# that response.
+#
+# Only conditions that can clear on their own are retried. Auth, payload and
+# not-found errors fail immediately, because repeating them only delays the
+# real error. The retry is inlined rather than imported: this script is mounted
+# into a container as a single file, so a sibling module is a bundling risk.
+RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
+MAX_ATTEMPTS = int(os.getenv("GRAFANA_PROVISION_MAX_ATTEMPTS", "6"))
+RETRY_BASE_SECONDS = float(os.getenv("GRAFANA_PROVISION_RETRY_BASE_SECONDS", "2"))
+RETRY_MAX_SECONDS = float(os.getenv("GRAFANA_PROVISION_RETRY_MAX_SECONDS", "30"))
+
+
+def _retry_delay_seconds(attempt: int) -> float:
+    """Exponential backoff capped so an outage cannot become an unbounded wait."""
+    return min(RETRY_BASE_SECONDS * 2 ** (max(attempt, 1) - 1), RETRY_MAX_SECONDS)
 
 
 def _required_env(name: str) -> str:
@@ -21,6 +41,19 @@ def _required_env(name: str) -> str:
     if not value:
         raise RuntimeError(f"{name} is required")
     return value
+
+
+def _decode(raw: bytes) -> dict[str, Any]:
+    """Parse a Grafana body, tolerating the HTML a gateway may return."""
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        # A waking instance or proxy can answer with HTML. Keep the text so the
+        # surfaced error describes the real failure, not a JSON parse error.
+        return {"message": raw.decode("utf-8", "replace")[:200]}
+    return parsed if isinstance(parsed, dict) else {"body": parsed}
 
 
 def _request(
@@ -33,27 +66,58 @@ def _request(
     accepted: tuple[int, ...] = (200,),
 ) -> tuple[int, Any]:
     data = json.dumps(payload).encode() if payload is not None else None
-    request = Request(
-        f"{base_url.rstrip('/')}{endpoint}",
-        data=data,
-        method=method,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-    )
-    try:
-        with urlopen(request, timeout=30) as response:  # noqa: S310
-            status = response.status
-            body = json.loads(response.read() or b"{}")
-    except HTTPError as exc:
-        status = exc.code
-        raw_body = exc.read()
-        body = json.loads(raw_body or b"{}")
-    if status not in accepted:
-        message = body.get("message", "unknown Grafana API error")
-        raise RuntimeError(f"{method} {endpoint} failed with HTTP {status}: {message}")
-    return status, body
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        request = Request(
+            f"{base_url.rstrip('/')}{endpoint}",
+            data=data,
+            method=method,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
+        transient_reason: str | None = None
+        try:
+            with urlopen(request, timeout=30) as response:  # noqa: S310
+                status = response.status
+                body = _decode(response.read())
+        except HTTPError as exc:
+            status = exc.code
+            body = _decode(exc.read())
+            if status in RETRYABLE_STATUSES:
+                transient_reason = (
+                    f"HTTP {status}: {body.get('message', 'provider not ready')}"
+                )
+        except URLError as exc:
+            # DNS, connection reset and timeouts are worth repeating.
+            status = 0
+            body = {}
+            transient_reason = f"connection failed: {exc.reason}"
+
+        if transient_reason is None:
+            if status not in accepted:
+                message = body.get("message", "unknown Grafana API error")
+                raise RuntimeError(
+                    f"{method} {endpoint} failed with HTTP {status}: {message}"
+                )
+            return status, body
+
+        if attempt == MAX_ATTEMPTS:
+            raise RuntimeError(
+                f"{method} {endpoint} failed after {MAX_ATTEMPTS} attempts: "
+                f"{transient_reason}"
+            )
+
+        delay = _retry_delay_seconds(attempt)
+        print(
+            f"Grafana not ready (attempt {attempt}/{MAX_ATTEMPTS}), "
+            f"retrying in {delay:.0f}s: {transient_reason}",
+            flush=True,
+        )
+        time.sleep(delay)
+
+    raise RuntimeError(f"{method} {endpoint} exhausted its retry budget")
 
 
 def _replace_strings(value: Any, old: str, new: str) -> Any:
