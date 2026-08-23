@@ -118,6 +118,7 @@ jobs:
           context: .
           push: false
           load: true
+          pull: true
           tags: sicurre-ml:ci-check
           # Use GitHub Actions cache to speed up repeated builds
           cache-from: type=gha,scope=ci-image
