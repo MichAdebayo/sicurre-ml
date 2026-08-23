@@ -43,6 +43,7 @@ env:
   KERNEL_SLUG: ${{ secrets.KAGGLE_USERNAME }}/sicurre-training
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
