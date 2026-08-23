@@ -44,3 +44,5 @@ docs/report/**
 !docs/api/openapi.yaml
 docs/ops/
 docs/ops/**
+
+*.png
