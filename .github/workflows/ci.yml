@@ -59,7 +59,7 @@ jobs:
 
   # ── 3. Tests + coverage ──────────────────────────────────────────────────
   test:
-    name: Tests (≥90% coverage)
+    name: Tests (full ≥80%, training core ≥90%)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,24 +72,34 @@ jobs:
       - name: Install dev + ml + inference deps
         run: uv sync --group dev --group ml --group inference --frozen
 
-      - name: Run unit tests with coverage gate
+      - name: Verify generated OpenAPI contract
+        run: uv run python .github/scripts/generate_openapi.py --check
+
+      - name: Run unit tests with branch reporting
         run: |
           uv run pytest tests/unit \
-            --cov=src/config \
-            --cov=src/data \
-            --cov=src/model \
-            --cov=src/training \
+            --cov=src \
+            --cov-branch \
             --cov-report=xml \
+            --cov-report=json \
             --cov-report=term-missing \
-            --cov-fail-under=90 \
             -v
+
+      - name: Enforce statement coverage policy
+        run: |
+          uv run python .github/scripts/check_coverage.py \
+            --report coverage.json \
+            --full-min 80 \
+            --core-min 90
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: coverage-report
-          path: coverage.xml
+          path: |
+            coverage.xml
+            coverage.json
           retention-days: 7
 
   # ── 4. Docker build check ────────────────────────────────────────────────
@@ -108,6 +118,7 @@ jobs:
           context: .
           push: false
           load: true
+          pull: true
           tags: sicurre-ml:ci-check
           # Use GitHub Actions cache to speed up repeated builds
           cache-from: type=gha,scope=ci-image

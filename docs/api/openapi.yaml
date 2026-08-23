@@ -144,8 +144,7 @@ components:
           default: true
         mail_context:
           $ref: '#/components/schemas/MailContextRequest'
-          description: Bounded gateway-derived context; never raw headers or user
-            content
+          description: Bounded gateway-derived context; never raw headers or user content
       type: object
       required:
       - text

@@ -8,8 +8,19 @@
 # Run:    docker run -p 8000:8000 --env-file .env sicurre-ml
 # ─────────────────────────────────────────────────────────────────────────────
 
+# ── Shared patched base ───────────────────────────────────────────────────────
+FROM python:3.12-slim AS secured-base
+
+# The upstream slim tag can briefly lag Debian security publications. Apply all
+# available security upgrades so both build and runtime stages use patched OS
+# packages, then remove package indexes from the resulting layer.
+RUN apt-get update \
+    && apt-get dist-upgrade --yes \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # ── Stage 1: dependency install ───────────────────────────────────────────────
-FROM python:3.12-slim AS builder
+FROM secured-base AS builder
 
 # Pin the build tool and avoid a floating cross-registry build stage.
 RUN python -m pip install --no-cache-dir uv==0.11.14
@@ -26,7 +37,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --group inference --no-dev --frozen
 
 # ── Stage 2: runtime image ───────────────────────────────────────────────────
-FROM python:3.12-slim AS runtime
+FROM secured-base AS runtime
 
 ARG SERVICE_VERSION=0.1.0
 

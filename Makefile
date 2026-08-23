@@ -1,4 +1,4 @@
-.PHONY: serve serve-reload health classify-test phishtank-test install lint typecheck test
+.PHONY: serve serve-reload health classify-test phishtank-test install lint typecheck test openapi openapi-check coverage
 
 # ── Inference API ──────────────────────────────────────────────────────────────
 
@@ -49,4 +49,15 @@ typecheck:
 test:
 	uv run pytest
 
-check: lint typecheck test
+openapi:
+	uv run python .github/scripts/generate_openapi.py
+
+openapi-check:
+	uv run python .github/scripts/generate_openapi.py --check
+
+coverage:
+	XDG_CACHE_HOME=/tmp/sicurre-coverage-cache uv run pytest tests/unit \
+		--cov=src --cov-branch --cov-report=term-missing --cov-report=json
+	uv run python .github/scripts/check_coverage.py
+
+check: lint typecheck openapi-check test
