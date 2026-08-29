@@ -204,6 +204,8 @@ def _call_groq(
     )
 
 
+# Retained but not in _TIERS: re-adding it is a one-line change if the quota is
+# ever restored. It no-ops safely while CEREBRAS_API_KEY is unset.
 def _call_cerebras(
     text: str,
     sender: str | None = None,
@@ -510,7 +512,13 @@ def _resilient_post(
 
 
 ProviderTier = Callable[..., LLMResult | None]
-_TIERS: tuple[ProviderTier, ...] = (_call_mistral, _call_groq, _call_cerebras)
+# Two tiers, deliberately. Cerebras was removed after its quota lapsed: a tier
+# that cannot succeed still costs a round-trip inside the shared budget and
+# fills provider telemetry with permanent failures that mask real ones.
+# Mistral stays first — EU-hosted, and measured 5/5 reliable on this prompt
+# where Groq fails JSON validation at low output caps. Groq is faster
+# (959 ms p50 vs 1318 ms) and is the fallback for Mistral rate limiting.
+_TIERS: tuple[ProviderTier, ...] = (_call_mistral, _call_groq)
 
 
 def classify_llm(
