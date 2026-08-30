@@ -126,6 +126,7 @@ _SYSTEM = textwrap.dedent(
       "explanation": "<raison générique en français, sans contenu sensible>"
     }
     La somme des trois probabilités doit être égale à 1.
+    L'explication doit tenir en 12 mots maximum, sans phrase complète.
     """
 )
 
