@@ -43,7 +43,11 @@ class TrainingConfig:
     batch_size: int = 8
     learning_rate: float = 2e-5
     weight_decay: float = 0.01
-    num_epochs: int = 4
+    # Three, not four: the sign-off-balanced dataset is ~3x the previous size
+    # (77,632 rows vs 26,073), so three passes already see more than twice the
+    # samples the old four-epoch run did. A fourth pass costs an hour of GPU for
+    # a model that saturates recall within the first few thousand steps.
+    num_epochs: int = 3
     seed: int = 42
     use_fp16: bool = False
     use_bf16: bool = False
