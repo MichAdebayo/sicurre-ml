@@ -168,6 +168,57 @@ def load_secrets(runtime_env: RuntimeEnv) -> dict[str, str | None]:
     return secrets
 
 
+def enable_deterministic_training(seed: int = 42) -> dict[str, object]:
+    """Pin every source of run-to-run randomness we can reach.
+
+    Setting `seed` alone is not enough on a GPU. cuDNN benchmarks several
+    convolution algorithms on first use and keeps whichever was fastest on that
+    machine at that moment, and several CUDA kernels accumulate with atomics
+    whose order is not fixed. Two runs of identical code on identical data
+    therefore produce different weights.
+
+    That is not theoretical here. Two runs of this pipeline with the same
+    dataset, the same four epochs and the same 168 recorded parameters produced
+    phishing recall of 0.68 and 0.92, and legitimate false-positive rates of
+    0.28 and 0.56. The promotion gate permits no regression on either number, so
+    without this it is comparing draws rather than models.
+
+    `warn_only=True` is deliberate: a handful of operations have no deterministic
+    implementation, and raising on them would abort training instead of merely
+    leaving those few ops unpinned. This removes the large, dominant sources.
+
+    CUBLAS_WORKSPACE_CONFIG must be set before the first CUDA context is created,
+    so call this early - before the model or any tensor is built.
+    """
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    os.environ.setdefault("PYTHONHASHSEED", str(seed))
+
+    import random
+
+    import numpy as np
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    try:
+        torch.use_deterministic_algorithms(True, warn_only=True)
+    except Exception:  # noqa: BLE001 - older torch without the kwarg
+        torch.use_deterministic_algorithms(True)
+
+    return {
+        "seed": seed,
+        "cudnn_deterministic": True,
+        "cudnn_benchmark": False,
+        "cublas_workspace_config": os.environ["CUBLAS_WORKSPACE_CONFIG"],
+        "deterministic_algorithms": True,
+    }
+
+
 def create_training_config(device: str) -> TrainingConfig:
     return TrainingConfig(
         batch_size=16 if device == "cuda" else 8,
