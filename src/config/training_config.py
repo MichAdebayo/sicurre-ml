@@ -43,11 +43,16 @@ class TrainingConfig:
     batch_size: int = 8
     learning_rate: float = 2e-5
     weight_decay: float = 0.01
-    # Three, not four: the sign-off-balanced dataset is ~3x the previous size
-    # (77,632 rows vs 26,073), so three passes already see more than twice the
-    # samples the old four-epoch run did. A fourth pass costs an hour of GPU for
-    # a model that saturates recall within the first few thousand steps.
-    num_epochs: int = 3
+    # Four, matching the epoch budget the incumbent (v15) was trained with, so
+    # candidates are comparable to it rather than systematically undertrained.
+    #
+    # This was briefly lowered to three while training on a ~3x augmented corpus,
+    # where three passes already exceed the samples a four-epoch run sees on the
+    # base data. That reasoning does not carry over to base-sized datasets: a
+    # three-epoch run on 26k rows sees 78k samples against the incumbent's 104k,
+    # a 25% deficit that shows up as a weighted-F1 gap and gets misread as a
+    # worse recipe. Scale epochs to the corpus; do not carry a number across.
+    num_epochs: int = 4
     seed: int = 42
     use_fp16: bool = False
     use_bf16: bool = False
