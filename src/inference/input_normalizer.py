@@ -184,13 +184,28 @@ def canonicalize_email(
     clean_body = _clean_text(body, limit=body_limit)
     clean_subject = _clean_text(subject or "", limit=500)
     domain = sender_domain(sender)
+    # Feed the classifier the shape it was trained on: "Objet : <subject>",
+    # a blank line, then the body. The previous framing added
+    # "Domaine expéditeur :" and "Message :" labels that appear nowhere in the
+    # training corpus -- which has no sender field at all -- so every production
+    # request arrived partly out of distribution.
+    #
+    # Measured on production sha 86e90dc5 against the same emails: the old
+    # framing scored 0.68 phishing recall on the golden set where this one
+    # scores 0.84, and a single appended sign-off flipped 18 of 200 phishing
+    # samples to "legitimate" under the old framing versus 1 of 200 here.
+    #
+    # The domain is kept -- it carries real signal, suspicious TLDs especially --
+    # but trails the body as plain text rather than sitting behind an unseen
+    # label. It costs a small rise in legitimate false positives, accepted
+    # deliberately in exchange for the recall.
     model_parts = []
     if clean_subject:
         model_parts.append(f"Objet : {clean_subject}")
+    model_parts.append(clean_body)
     if domain != "non-fourni":
-        model_parts.append(f"Domaine expéditeur : {domain}")
-    model_parts.append(f"Message : {clean_body}")
-    model_text = "\n".join(model_parts)
+        model_parts.append(domain)
+    model_text = "\n\n".join(model_parts)
     security_text = "\n".join(
         item for item in (clean_subject, clean_body) if item
     )
