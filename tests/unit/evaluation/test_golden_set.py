@@ -55,7 +55,7 @@ def test_loads_checksum_verified_approved_jsonl(tmp_path: Path) -> None:
     samples = load_approved_golden_set(path, _reference(path))
 
     assert samples[0].id == "golden-001"
-    assert "Subject: Vérification du compte" in samples[0].model_text
+    assert "Objet : Vérification du compte" in samples[0].model_text
 
 
 def test_rejects_checksum_mismatch(tmp_path: Path) -> None:
@@ -118,3 +118,25 @@ def test_false_positive_rate_uses_legitimate_denominator_only() -> None:
 
     assert report.legitimate_false_positive_count == 1
     assert report.legitimate_false_positive_rate == 1.0
+
+
+def test_model_text_is_built_by_the_production_canonicaliser(tmp_path: Path) -> None:
+    """The gate must score candidates the way the scan path will serve them.
+
+    An evaluation that composes its own framing measures the wrapper as much as
+    the model, and can move a promotion decision on its own. Both sides now
+    derive the input from canonicalize_email, so they cannot drift apart.
+    """
+    from src.inference.input_normalizer import canonicalize_email
+
+    path = tmp_path / "golden.jsonl"
+    _write_jsonl(path, [_sample()])
+    sample = load_approved_golden_set(path, _reference(path))[0]
+
+    expected = canonicalize_email(
+        sample.text, subject=sample.subject, sender=sample.sender
+    ).model_text
+
+    assert sample.model_text == expected
+    assert "Subject:" not in sample.model_text
+    assert "From:" not in sample.model_text
