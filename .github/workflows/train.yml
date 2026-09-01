@@ -132,12 +132,8 @@ jobs:
       - name: Resolve production training dataset
         run: |
           set -euo pipefail
-          # TEMPORARY (restore to main-only after the signoff-balanced run):
-          # dispatching from mlops so this retrain does not require a merge to
-          # main, which would trigger CI -> CD and redeploy the inference
-          # service unattended. The training config change is serving-neutral.
-          if [ "$GITHUB_REF_NAME" != "main" ] && [ "$GITHUB_REF_NAME" != "mlops" ]; then
-            echo "Production training must be dispatched from main or mlops." >&2
+          if [ "$GITHUB_REF_NAME" != "main" ]; then
+            echo "Production training must be dispatched from main." >&2
             exit 1
           fi
           if [ -z "$KAGGLE_TRAINING_DATASET" ]; then
