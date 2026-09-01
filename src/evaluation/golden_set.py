@@ -93,15 +93,26 @@ class GoldenSample:
 
     @property
     def model_text(self) -> str:
-        return "\n".join(
-            part
-            for part in (
-                f"Subject: {self.subject}",
-                f"From: {self.sender}",
-                self.text,
-            )
-            if part
-        )
+        """Build the classifier input exactly as production does.
+
+        This used to compose its own framing -- "Subject:", "From:", in English --
+        which appeared neither in the training corpus nor in the serving path. The
+        gate was therefore scoring candidates under conditions no deployed model
+        ever meets, and the gap was not small: on this same 60-email set the
+        production model scores 0.68 phishing recall in one framing and 0.84 in
+        another. A promotion decision resting on that is measuring the wrapper as
+        much as the model.
+
+        Delegating to canonicalize_email removes the possibility of drift: the gate
+        and the scan path now derive their input from one function, so changing how
+        emails are presented to the model cannot silently change what promotion
+        means.
+        """
+        from src.inference.input_normalizer import canonicalize_email
+
+        return canonicalize_email(
+            self.text, subject=self.subject, sender=self.sender
+        ).model_text
 
 
 @dataclass(frozen=True, slots=True)
