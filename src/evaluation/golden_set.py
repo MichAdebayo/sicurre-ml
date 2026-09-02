@@ -143,6 +143,59 @@ class GoldenEvaluationReport:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class GoldenSetRelease:
+    """One published, human-approved evaluation set.
+
+    Registered explicitly rather than discovered from storage. The gate decides
+    what reaches production, so the set it scores against has to be immutable
+    and reviewed: listing a bucket and trusting whatever is newest would let
+    anyone with write access to that bucket change the bar.
+
+    Publishing a new set is therefore one reviewed line here, and the evaluator
+    then picks it up automatically - which is the part that was missing.
+    `golden-20260816-v3` sat in R2 unused from 16 August while the gate went on
+    scoring against a 60-sample set from 19 July.
+    """
+
+    version: str
+    object_key: str
+    sha256: str
+    schema_version: str
+    sample_count: int
+
+
+#: Newest last. `latest_golden_set()` picks the final entry.
+GOLDEN_SET_RELEASES: tuple[GoldenSetRelease, ...] = (
+    GoldenSetRelease(
+        version="golden-20260719-v1",
+        object_key="golden.jsonl",
+        sha256="bc329213cacddab409a63deb9d663e593351b6e740a45cdada4c201e3beea346",
+        schema_version="1",
+        sample_count=60,
+    ),
+    GoldenSetRelease(
+        version="golden-20260816-v3",
+        object_key="evaluation_sets/golden-20260816-v3/golden.jsonl",
+        sha256="6d15f2141cd69d98c9b4ee9b47d505c8aae8505d900fa77705fe0c57b13fb632",
+        schema_version="2",
+        sample_count=95,
+    ),
+)
+
+
+def latest_golden_set() -> GoldenSetRelease:
+    """The most recent published evaluation set.
+
+    Evaluation must track the best available measure of real behaviour. A gate
+    pinned to an old set silently stops improving as the set grows, and the
+    comparison it reports gets weaker over time rather than stronger.
+    """
+    if not GOLDEN_SET_RELEASES:
+        raise ValueError("No golden set releases are registered")
+    return GOLDEN_SET_RELEASES[-1]
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -189,6 +242,20 @@ def load_approved_golden_set(
 
     if not samples:
         raise ValueError("Golden set is empty")
+    if reference.schema_version == "2":
+        # Schema 2: the set is expected to grow, so its size is not pinned.
+        # What must hold is that it still measures the thing it exists to
+        # measure - all three classes present, French only. Pinning exact counts
+        # here would mean every published set needed a code change to be
+        # loadable, which is how v3 ended up sitting in storage unused.
+        present = {sample.expected_label for sample in samples}
+        missing = {"phishing", "spam", "legitimate"} - present
+        if missing:
+            raise ValueError(f"Golden set is missing classes: {sorted(missing)}")
+        if any(sample.language != "fr" for sample in samples):
+            raise ValueError("Golden set must contain French examples only")
+        return samples
+
     if reference.schema_version == "1":
         expected_counts = {"phishing": 25, "legitimate": 25, "spam": 10}
         actual_counts = {
