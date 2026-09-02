@@ -46,6 +46,12 @@ is no redundancy, no load balancer, and no failover. Every number below is
 chosen to be honest about that rather than to look impressive: a 99.9% promise
 on one box without HA would be fiction.
 
+> **Nothing below has been measured yet.** The structured request log these
+> indicators depend on is specified in [monitoring design](monitoring-design.md)
+> but not implemented, so every serving number here is a target set in advance,
+> not an observation. Treat them as the definition of what to measure, and
+> re-derive them from observed distributions once thirty days of history exist.
+
 ### SLIs
 
 | ID | SLI | How it is measured |
@@ -77,11 +83,17 @@ on one box without HA would be fiction.
 
 ### Graceful degradation is the load-bearing property
 
-The pipeline runs four stages — `rules`, `blocklist`, `onnx`, `llm`. The LLM
-stage is dispatched to a thread pool and joined before the composite score is
-formed, so it gates total latency; but when the whole provider chain fails, the
-pipeline records `llm_unavailable` in `degraded_reasons` and **still returns a
-verdict** from the remaining stages.
+The pipeline runs four stages — `rules`, `blocklist`, `onnx`, `llm`. `onnx` and
+`llm` are each submitted to their own thread pool; `rules` and then `blocklist`
+run sequentially on the main thread while those are in flight. All are joined
+before the composite score is formed, so the slowest gates total latency — in
+practice the LLM. When the whole provider chain fails, the pipeline records
+`llm_unavailable` in `degraded_reasons` and **still returns a verdict** from the
+remaining stages.
+
+`blocklist` reads a local PhishTank set by default. VirusTotal enrichment is
+opt-in per request (`use_virustotal`, default `false`) and makes a live API call
+with a 10 s timeout, which changes the latency profile materially when enabled.
 
 This is why `S2` (a verdict was returned) and `S5` (it was a full-confidence
 verdict) are tracked separately. An LLM outage should show up as a degraded-mode

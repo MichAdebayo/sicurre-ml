@@ -13,7 +13,6 @@ Training pipeline, evaluation gates, and the ONNX inference service behind
 [![Base model](https://img.shields.io/badge/base-CamemBERTaV2-FCC624?logo=huggingface&logoColor=black)](docs/adr/0001-camembertv2-as-base-model.md)
 [![Runtime](https://img.shields.io/badge/runtime-ONNX-005CED?logo=onnx&logoColor=white)](src/inference/onnx_classifier.py)
 [![Tracking](https://img.shields.io/badge/tracking-MLflow-0194E2?logo=mlflow&logoColor=white)](docs/adr/0004-mlflow-for-tracking.md)
-[![Weighted F1](https://img.shields.io/badge/weighted%20F1-0.8515-success)](docs/architecture/service-levels.md#the-incumbent)
 [![Promotion](https://img.shields.io/badge/promotion-manual%20approval-important)](docs/model/promotion-policy.md)
 
 </div>
@@ -76,16 +75,26 @@ one weighted composite score.
 ```mermaid
 flowchart LR
     IN["Email text"] --> N["Normalize"]
-    N --> R["rules<br/><i>sub-ms</i>"]
-    N --> B["blocklist<br/><i>sub-ms</i>"]
-    N --> O["onnx<br/><i>&lt;500 ms</i>"]
-    N -.->|"thread pool"| L["llm<br/><i>Groq → Cerebras</i>"]
-    R --> C["Composite score"]
-    B --> C
-    O --> C
+    N --> O["onnx<br/>thread pool"]
+    N -.->|"if enabled"| L["llm<br/>thread pool<br/>Groq → Cerebras"]
+    N --> S["rules → blocklist<br/>main thread"]
+    O --> C["Composite score"]
     L -.->|"may be absent"| C
+    S --> C
     C --> V["verdict + degraded_reasons"]
 ```
+
+`onnx` and `llm` are each submitted to their own thread pool; `rules` and then
+`blocklist` run sequentially on the main thread while those are in flight, and
+the futures are joined before the composite is formed.
+
+**No production latency has been measured yet.** The structured request log in
+[monitoring design](docs/architecture/monitoring-design.md) is not implemented,
+so every latency figure in this repo is a target, not an observation.
+
+`blocklist` checks a local PhishTank set by default. VirusTotal enrichment is
+opt-in per request (`use_virustotal`, default `false`) and makes a live API call
+with a 10 s timeout, so it materially changes latency when enabled.
 
 The LLM stage is dispatched to a thread pool and joined before scoring, so it
 gates total latency. **When the whole provider chain fails, the pipeline records
@@ -111,7 +120,9 @@ Full specification: **[docs/architecture/service-levels.md](docs/architecture/se
 | Pipeline | Rollback time | < 15 min |
 
 The deployment is a single node with no failover, and the targets are set to be
-honest about that rather than aspirational.
+honest about that rather than aspirational. **They are provisional**: they were
+set in advance rather than derived from observed distributions, and should be
+re-derived once the request log has thirty days of history.
 
 ## API surface
 

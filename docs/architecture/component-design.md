@@ -23,7 +23,6 @@
 | `src/inference/` | Four-stage classification pipeline, ONNX session, LLM chain |
 | `src/serving/` | FastAPI application, authentication, rate limiting |
 | `src/registry/` | MLflow logging and Hugging Face publication |
-| `notebooks/` | Thin orchestration wrappers around `src/` |
 | `scripts/` | Local operational helpers |
 
 ## Inference composition
@@ -33,10 +32,14 @@ and combines them into one weighted composite:
 
 | Stage | Source | Character |
 |-------|--------|-----------|
-| `rules` | `rules.py` | Deterministic heuristics, sub-millisecond |
-| `blocklist` | `blocklist.py`, `phishtank_loader.py` | Known-bad lookup, sub-millisecond |
-| `onnx` | `onnx_classifier.py` | The trained model, the primary signal |
+| `rules` | `rules.py` | Deterministic URL heuristics, main thread |
+| `blocklist` | `blocklist.py`, `phishtank_loader.py` | Local PhishTank lookup, main thread. Optional VirusTotal enrichment (`use_virustotal`, default off) makes a live API call with a 10 s timeout |
+| `onnx` | `onnx_classifier.py` | The trained model, the primary signal, dispatched to a thread pool |
 | `llm` | `llm_classifier.py` | Groq with Cerebras fallback, dispatched to a thread pool |
+
+`onnx` and `llm` are submitted to their executors first; `rules` and then
+`blocklist` run sequentially on the main thread before the futures are joined.
+No production latency has been measured yet, so any figure here is a target.
 
 Stage weights are environment-driven so they can be tuned without a redeploy.
 
