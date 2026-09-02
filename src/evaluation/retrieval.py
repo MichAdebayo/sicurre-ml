@@ -16,8 +16,17 @@ def download_r2_object(
     expected_sha256: str,
 ) -> Path:
     """Download one explicitly named R2 object and verify its immutable checksum."""
-    if object_key != "golden.jsonl":
-        raise ValueError("R2 evaluation retrieval is restricted to golden.jsonl")
+    # Restricted to registered evaluation sets. The point of the restriction is
+    # that this path cannot be pointed at arbitrary storage; allowing the keys
+    # in GOLDEN_SET_RELEASES keeps that property while letting the gate move to
+    # a newer published set without a code change here.
+    from src.evaluation.golden_set import GOLDEN_SET_RELEASES
+
+    permitted = {release.object_key for release in GOLDEN_SET_RELEASES}
+    if object_key not in permitted:
+        raise ValueError(
+            f"R2 evaluation retrieval is restricted to registered golden sets: {sorted(permitted)}"
+        )
     import boto3
     from botocore.config import Config
 
