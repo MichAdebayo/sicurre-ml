@@ -25,6 +25,7 @@ summary of the available evidence.
 | [Non-functional requirements](architecture/non-functional-requirements.md) | Engineering requirements, distinct from verified results and contractual promises |
 | [Monitoring design](architecture/monitoring-design.md) | Runtime signals, log schema, alerting targets |
 | [Sync contracts](architecture/sync-contracts.md) | Dataset and callback contracts across the repo boundary |
+| [Post-deployment validation](architecture/post-deployment-validation.md) | What every deploy and promotion checks before the change is accepted |
 | [API contract and coverage policy](architecture/api-contract-and-coverage-policy.md) | Deterministic OpenAPI generation, coverage gates |
 
 ## Model
