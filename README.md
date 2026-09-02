@@ -137,6 +137,14 @@ The SLA carries consequences, not just a threshold: a breach opens an incident
 and **freezes model promotion** until the service is back inside its objectives
 for seven consecutive days.
 
+> **The `mode=llm` 8 s figure is a current ceiling, not a target.**
+> Classification is synchronous on the mail delivery path — a Cloudflare Email
+> Worker waits for the verdict before forwarding, and sends `use_llm: true`. A
+> slow LLM therefore delays delivery and, because the Worker fails open,
+> silently delivers unscanned mail. An 8 s budget is not defensible there. See
+> [the delivery-path constraint](docs/architecture/service-levels.md#the-delivery-path-constraint)
+> for the nested timeouts and the three ways to close the gap.
+
 ## API surface
 
 | Method | Path | Auth | Purpose |

@@ -78,6 +78,71 @@ The provider chain is `_TIERS = (_call_mistral, _call_groq)` —
 **Mistral, then Groq**, sequential within one shared deadline. Cerebras is
 implemented but is not in the chain.
 
+### The delivery-path constraint
+
+**Classification is synchronous on the mail delivery path.** This is the
+constraint every latency number here must answer to, and the first draft of this
+document did not account for it.
+
+The consumer is a Cloudflare Email Worker
+(`sicurre/deploy/cloudflare/email-gateway-worker.js`). Per ADR-0001 it receives
+inbound mail, calls `POST /v1/email/scan`, **waits for the verdict**, and only
+then forwards or rejects. The Worker sends `use_llm: true` explicitly, so the
+LLM chain sits inside SMTP delivery for every message.
+
+The nested budgets:
+
+| Hop | Timeout | Source |
+|-----|---------|--------|
+| Worker → `/v1/email/scan` | **10 s** | `AbortSignal.timeout(10_000)` |
+| `sicurre` → `/v1/classify` | **15 s** | `httpx.Timeout(15.0)` |
+| LLM chain inside `/v1/classify` | **7.5 s** | `LLM_TOTAL_TIMEOUT_SECONDS` |
+
+Two defects follow, and neither is a documentation problem:
+
+**The inner timeout exceeds the outer.** `sicurre` waits 15 s for a response the
+Worker abandoned at 10 s, holding a connection from a pool of 10
+(`httpx.Limits(max_connections=10)`) for five seconds after nobody is listening.
+Ten concurrent slow scans exhaust it. An inner timeout must always be shorter
+than the outer one.
+
+**A slow LLM is a silent security bypass, not just a delay.** On timeout the
+Worker sets `scanStatus = 'api-unreachable'`, leaves `verdict` at its `'safe'`
+default, and forwards the message. That fail-open choice is deliberate and
+correct for mail availability — losing mail is worse than missing a scan — but
+it means anything that makes the LLM slow *delivers unscanned phishing*.
+Latency on this path is a security property, not a comfort metric.
+
+### What this means for `S4`
+
+An 8 s p95 is **not a defensible objective for a delivery-path classifier.** It
+was adopted here because it matched the deployed alert, which in turn appears to
+have been set to accommodate the LLM rather than to meet any delivery
+requirement. That is the wrong direction of derivation: the objective should
+come from what mail delivery can tolerate, then the architecture should be made
+to fit it.
+
+`S4` is therefore recorded below as the **current measured ceiling, not a
+target**. The target should be set by the delivery budget — on the order of one
+to two seconds — which cannot be met with a 7.5 s synchronous LLM chain. Three
+ways to close the gap, in preference order:
+
+1. **Take the LLM off the delivery path.** Scan with `use_llm=false` (rules,
+   blocklist, ONNX — already alerted at 1 s), forward on that verdict, and run
+   the LLM asynchronously to quarantine or recall after the fact. Delivery
+   latency becomes sub-second and the LLM stops being able to block mail.
+2. **Gate the LLM on ONNX uncertainty.** Call it only when the composite score
+   is near the threshold, so the slow path is rare rather than universal.
+3. **Cut the budget.** Keep it inline but reduce `LLM_TOTAL_TIMEOUT_SECONDS` to
+   roughly 1.2 s, accepting lower LLM coverage in exchange for a bounded path.
+
+Option 1 is the one that makes this model's own SLO meaningful, because it
+separates "how fast must a verdict reach the Worker" from "how good can the
+verdict eventually be".
+
+These are changes in the `sicurre` repo and are recorded here because they
+determine whether the numbers below mean anything.
+
 ### SLIs
 
 | ID | SLI | Source |
@@ -95,12 +160,14 @@ implemented but is not in the chain.
 | `S1` | Readiness | 99.0% | 30 d | 7 h 12 m |
 | `S2` | Success ratio | 99.0% | 30 d | 1 in 100 requests |
 | `S3` | `mode=local` p95 | < 1 s | 7 d | — |
-| `S4` | `mode=llm` p95 | < 8 s | 7 d | — |
+| `S4` | `mode=llm` p95 | < 8 s — **current ceiling, not a target**; see the delivery-path constraint | 7 d | — |
 | `S5` | Degraded ratio | < 10% | 7 d | — |
 
-`S3` and `S4` are set equal to the deployed alert thresholds so a page and a
-breach mean the same thing. `S4`'s 8 s sits just above the 7.5 s chain deadline,
-leaving room for the local stages and serialisation.
+`S3` and `S4` equal the deployed alert thresholds so a page and a breach mean
+the same thing. `S4`'s 8 s sits just above the 7.5 s chain deadline — but it
+describes what the system currently does, not what a delivery-path classifier
+should promise. It should fall to the delivery budget once the LLM moves off the
+synchronous path.
 
 ### SLA offered to `sicurre`
 
