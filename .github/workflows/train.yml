@@ -330,7 +330,36 @@ jobs:
         run: |
           set -euo pipefail
           output_dir=$(mktemp -d)
-          kaggle kernels output "${{ env.KERNEL_SLUG }}" -p "$output_dir"
+
+          # Retry the artifact download.
+          #
+          # This pulls ~890MB back from Kaggle *after* the GPU training has
+          # already completed, and it ran exactly once. On 1 September the
+          # kernel finished COMPLETE with no failure message and this step
+          # still failed the whole workflow on
+          #   Connection broken: IncompleteRead(230600704 bytes read,
+          #                                     659244026 more expected)
+          # discarding a finished model to a transient network fault. The
+          # candidate had to be recovered by hand.
+          #
+          # `kernels output` is idempotent, so retrying is safe: a partial
+          # directory is simply overwritten by the next attempt.
+          downloaded=false
+          for attempt in 1 2 3 4 5; do
+            if kaggle kernels output "${{ env.KERNEL_SLUG }}" -p "$output_dir"; then
+              downloaded=true
+              break
+            fi
+            echo "Kernel output download attempt $attempt failed; retrying." >&2
+            rm -rf "${output_dir:?}"/*
+            sleep $((attempt * 30))
+          done
+          if [ "$downloaded" != true ]; then
+            echo "Kernel output download failed after 5 attempts." >&2
+            echo "The trained model may still exist on Kaggle under ${{ env.KERNEL_SLUG }}." >&2
+            exit 1
+          fi
+
           manifest=$(find "$output_dir" -name training-manifest.json -print -quit)
           test -n "$manifest" || { echo "Training output has no lineage manifest." >&2; exit 1; }
           python3 - "$manifest" >> "$GITHUB_OUTPUT" <<'PYEOF'
