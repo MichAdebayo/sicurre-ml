@@ -59,7 +59,26 @@ class TrainingConfig:
     enable_quantization: bool = False
     quantization_mode: str | None = None
     class_weight_strategy: str = "inverse_freq"
-    phishing_boost: float = 2.0
+    # Neutral by design, and the neutrality is the point.
+    #
+    # inverse_freq sets w proportional to 1/n, so n * w is constant across
+    # classes: the weighting cancels the imbalance exactly. phishing_boost is
+    # then applied to class 0 afterwards, in SicurreTrainer.compute_loss, which
+    # means phishing contributes exactly `boost` times the gradient of any other
+    # class - no matter what the distribution does.
+    #
+    # At 2.0 that pull measured 2.00x against legitimate on the 18 July corpus
+    # (phishing 35.3%) and 2.00x again on the 1 September corpus (phishing
+    # 38.1%). Identical, because the boost is invariant to the data. It was
+    # introduced when phishing was the scarce class; phishing is now the largest
+    # class and still carries the thumb on the scale.
+    #
+    # Eight retrains failed the promotion gate the same way - recall climbs,
+    # legitimate false positives climb harder, run 8 reaching legitFP 0.80 -
+    # which is the signature of exactly this pull. Setting the boost to 1.0
+    # leaves inverse_freq to balance the classes on its own, which is what it
+    # already does correctly.
+    phishing_boost: float = 1.0
     gamma: float = 1.5
     mlflow_model_name: str = "main.sicurre.phishing-detector"
 
