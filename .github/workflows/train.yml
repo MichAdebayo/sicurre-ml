@@ -110,7 +110,7 @@ jobs:
       candidate_mlflow_run_id: ${{ steps.lineage.outputs.candidate_mlflow_run_id }}
       candidate_mlflow_model_version: ${{ steps.lineage.outputs.candidate_mlflow_model_version }}
       candidate_hf_revision: ${{ steps.lineage.outputs.candidate_hf_revision }}
-      hf_repository: ${{ steps.lineage.outputs.hf_repository }}
+      hf_repository_name: ${{ steps.lineage.outputs.hf_repository_name }}
       semantic_version: ${{ steps.lineage.outputs.semantic_version }}
       service_source_revision: ${{ steps.lineage.outputs.service_source_revision }}
       training_github_run_id: ${{ steps.lineage.outputs.training_github_run_id }}
@@ -374,7 +374,14 @@ jobs:
               "candidate_mlflow_run_id": model["mlflow_run_id"],
               "candidate_mlflow_model_version": model["mlflow_model_version"],
               "candidate_hf_revision": model["huggingface_revision"],
-              "hf_repository": model["huggingface_repo"],
+              # Only the repository NAME crosses the job boundary. The full
+              # "owner/name" contains HF_USERNAME, which is a registered secret,
+              # and GitHub passes any job output containing a secret to
+              # downstream jobs as an EMPTY STRING. That silently emptied
+              # hf_repository on every run, and the evaluate job then failed its
+              # format check on "" - which is why automatic evaluation had never
+              # once succeeded. Consumers recompose owner/name from the secret.
+              "hf_repository_name": model["huggingface_repo"].split("/")[-1],
               "semantic_version": model["semantic_version"],
               "service_source_revision": payload["source_revision"],
               "training_github_run_id": payload["github_run_id"],
@@ -415,7 +422,7 @@ jobs:
       candidate_mlflow_model_version: ${{ needs.sync-and-retrain.outputs.candidate_mlflow_model_version }}
       candidate_hf_revision: ${{ needs.sync-and-retrain.outputs.candidate_hf_revision }}
       incumbent_hf_revision: production
-      hf_repository: ${{ needs.sync-and-retrain.outputs.hf_repository }}
+      hf_repository_name: ${{ needs.sync-and-retrain.outputs.hf_repository_name }}
       semantic_version: ${{ needs.sync-and-retrain.outputs.semantic_version }}
       service_source_revision: ${{ needs.sync-and-retrain.outputs.service_source_revision }}
       training_github_run_id: ${{ needs.sync-and-retrain.outputs.training_github_run_id }}
@@ -432,6 +439,6 @@ jobs:
       candidate_mlflow_run_id: ${{ needs.evaluate-candidate.outputs.candidate_mlflow_run_id }}
       candidate_mlflow_model_version: ${{ needs.evaluate-candidate.outputs.candidate_mlflow_model_version }}
       candidate_hf_revision: ${{ needs.evaluate-candidate.outputs.candidate_hf_revision }}
-      hf_repository: ${{ needs.evaluate-candidate.outputs.hf_repository }}
+      hf_repository_name: ${{ needs.evaluate-candidate.outputs.hf_repository_name }}
       semantic_version: ${{ needs.evaluate-candidate.outputs.semantic_version }}
     secrets: inherit

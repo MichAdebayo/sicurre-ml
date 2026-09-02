@@ -7,7 +7,7 @@ on:
       candidate_mlflow_run_id: {required: true, type: string}
       candidate_mlflow_model_version: {required: true, type: string}
       candidate_hf_revision: {required: true, type: string}
-      hf_repository: {required: true, type: string}
+      hf_repository_name: {required: true, type: string}
       semantic_version: {required: true, type: string}
     secrets:
       DATABRICKS_HOST: {required: true}
@@ -33,8 +33,8 @@ on:
       candidate_hf_revision:
         description: "Immutable candidate Hugging Face SHA"
         required: true
-      hf_repository:
-        description: "Hugging Face owner/repository"
+      hf_repository_name:
+        description: "Hugging Face repository name, without the owner"
         required: true
       semantic_version:
         description: "Immutable semantic model version"
@@ -65,7 +65,9 @@ jobs:
       CANDIDATE_MLFLOW_RUN_ID: ${{ inputs.candidate_mlflow_run_id }}
       CANDIDATE_MLFLOW_MODEL_VERSION: ${{ inputs.candidate_mlflow_model_version }}
       CANDIDATE_HF_REVISION: ${{ inputs.candidate_hf_revision }}
-      HF_REPOSITORY: ${{ inputs.hf_repository }}
+      # Recomposed here rather than received. HF_USERNAME is a secret, so a
+      # job output carrying "owner/name" is scrubbed to empty in transit.
+      HF_REPOSITORY: ${{ secrets.HF_USERNAME }}/${{ inputs.hf_repository_name }}
       SEMANTIC_VERSION: ${{ inputs.semantic_version }}
 
     steps:

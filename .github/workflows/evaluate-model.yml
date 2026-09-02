@@ -7,7 +7,7 @@ on:
       candidate_mlflow_model_version: {required: true, type: string}
       candidate_hf_revision: {required: true, type: string}
       incumbent_hf_revision: {required: false, type: string, default: production}
-      hf_repository: {required: true, type: string}
+      hf_repository_name: {required: true, type: string}
       semantic_version: {required: true, type: string}
       service_source_revision: {required: true, type: string}
       training_github_run_id: {required: true, type: string}
@@ -25,8 +25,8 @@ on:
         value: ${{ jobs.evaluate.outputs.candidate_mlflow_model_version }}
       candidate_hf_revision:
         value: ${{ jobs.evaluate.outputs.candidate_hf_revision }}
-      hf_repository:
-        value: ${{ jobs.evaluate.outputs.hf_repository }}
+      hf_repository_name:
+        value: ${{ jobs.evaluate.outputs.hf_repository_name }}
       semantic_version:
         value: ${{ jobs.evaluate.outputs.semantic_version }}
     secrets:
@@ -56,8 +56,8 @@ on:
         description: "Immutable incumbent SHA or production tag"
         required: false
         default: "production"
-      hf_repository:
-        description: "Hugging Face owner/repository"
+      hf_repository_name:
+        description: "Hugging Face repository name, without the owner"
         required: true
       semantic_version:
         description: "Candidate semantic version"
@@ -89,7 +89,7 @@ jobs:
       candidate_mlflow_run_id: ${{ steps.evaluation.outputs.candidate_mlflow_run_id }}
       candidate_mlflow_model_version: ${{ steps.evaluation.outputs.candidate_mlflow_model_version }}
       candidate_hf_revision: ${{ steps.evaluation.outputs.candidate_hf_revision }}
-      hf_repository: ${{ steps.evaluation.outputs.hf_repository }}
+      hf_repository_name: ${{ inputs.hf_repository_name }}
       semantic_version: ${{ steps.evaluation.outputs.semantic_version }}
     env:
       R2_EVALUATION_ACCESS_KEY_ID: ${{ secrets.R2_EVALUATION_ACCESS_KEY_ID }}
@@ -107,7 +107,9 @@ jobs:
       CANDIDATE_MLFLOW_MODEL_VERSION: ${{ inputs.candidate_mlflow_model_version }}
       CANDIDATE_HF_REVISION: ${{ inputs.candidate_hf_revision }}
       INCUMBENT_HF_REVISION: ${{ inputs.incumbent_hf_revision }}
-      HF_REPOSITORY: ${{ inputs.hf_repository }}
+      # Recomposed here rather than received. HF_USERNAME is a secret, so a
+      # job output carrying "owner/name" is scrubbed to empty in transit.
+      HF_REPOSITORY: ${{ secrets.HF_USERNAME }}/${{ inputs.hf_repository_name }}
       SEMANTIC_VERSION: ${{ inputs.semantic_version }}
       SERVICE_SOURCE_REVISION: ${{ inputs.service_source_revision }}
       TRAINING_GITHUB_RUN_ID: ${{ inputs.training_github_run_id }}
