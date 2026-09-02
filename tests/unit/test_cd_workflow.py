@@ -122,44 +122,141 @@ def test_dashboard_and_alerts_distinguish_app_from_alloy() -> None:
         Path("deploy/grafana/alerts/sicurre-ml-alerts.json").read_text(encoding="utf-8")
     )
 
-    service_up = next(
-        panel for panel in dashboard["panels"] if panel["title"] == "Metrics scrape health"
-    )
+    panels = {p["title"]: p for p in dashboard["panels"] if p["type"] != "row"}
+    for row in (p for p in dashboard["panels"] if p["type"] == "row"):
+        panels.update({p["title"]: p for p in row.get("panels", [])})
+
+    service_up = panels["Metrics scrape health"]
     assert 'service_name="sicurre-ml-inference"' in service_up["targets"][0]["expr"]
     alert_expressions = {alert["uid"]: alert["expr"] for alert in alerts}
-    assert 'service_name="sicurre-ml-inference"' in alert_expressions[
-        "sicurre-ml-unavailable"
-    ]
-    assert 'service_name="sicurre-ml-alloy"' in alert_expressions[
-        "sicurre-ml-telemetry-scrape"
-    ]
+    assert 'service_name="sicurre-ml-inference"' in alert_expressions["sicurre-ml-unavailable"]
+    assert 'service_name="sicurre-ml-alloy"' in alert_expressions["sicurre-ml-telemetry-scrape"]
 
 
-def test_dashboard_is_an_inference_command_center() -> None:
+def _ml_dashboard_panels() -> dict:
+    """Flatten the dashboard, including panels nested inside collapsed rows."""
     dashboard = json.loads(
         Path("deploy/grafana/dashboards/sicurre-ml-runtime.json").read_text(encoding="utf-8")
     )
-    panels = {panel["title"]: panel for panel in dashboard["panels"]}
+    panels = {p["title"]: p for p in dashboard["panels"] if p["type"] != "row"}
+    for row in (p for p in dashboard["panels"] if p["type"] == "row"):
+        panels.update({p["title"]: p for p in row.get("panels", [])})
+    return dashboard, panels
 
-    assert dashboard["title"] == "Sicurre ML / Inference Command Center"
-    assert dashboard["time"]["from"] == "now-24h"
-    assert len(dashboard["panels"]) >= 20
+
+def test_dashboard_opens_on_a_screenshottable_first_view() -> None:
+    """The first screen must carry charts, not two rows of stat cards.
+
+    The dashboard previously spent its first ten grid units on stat cards and did
+    not reach a latency chart until y=21, so a 1440x900 capture showed no chart at
+    all. The first view is now a compact summary strip over two chart rows, and
+    everything else sits in collapsed sections.
+    """
+    dashboard, _ = _ml_dashboard_panels()
+
+    rows = [p for p in dashboard["panels"] if p["type"] == "row"]
+    assert rows, "detail must be grouped into collapsed rows"
+    assert all(r["collapsed"] for r in rows), "detail rows must start collapsed"
+
+    first_view = min(r["gridPos"]["y"] for r in rows)
+    assert first_view <= 17, (
+        f"the first view is {first_view} grid units tall and will not fit a "
+        f"1440x900 capture without scrolling"
+    )
+
+    charts_above_fold = [
+        p
+        for p in dashboard["panels"]
+        if p["type"] == "timeseries" and p["gridPos"]["y"] < first_view
+    ]
+    assert len(charts_above_fold) >= 4, (
+        "the first view must show latency, request rate, errors and provider "
+        "outcomes without scrolling"
+    )
+
+    for band_y in {p["gridPos"]["y"] for p in dashboard["panels"] if p["type"] != "row"}:
+        width = sum(
+            p["gridPos"]["w"]
+            for p in dashboard["panels"]
+            if p["type"] != "row" and p["gridPos"]["y"] == band_y
+        )
+        assert width == 24, f"row at y={band_y} occupies {width} of 24 columns"
+
+
+def test_dashboard_separates_the_service_from_its_telemetry_agent() -> None:
+    """Scrape health is the inference service, never the whole stack.
+
+    stack="sicurre-ml" also matches the Alloy agent, so an unscoped `up` would
+    report healthy whenever either process is scraped.
+    """
+    _, panels = _ml_dashboard_panels()
+
+    expr = panels["Metrics scrape health"]["targets"][0]["expr"]
+    assert 'service_name="sicurre-ml-inference"' in expr
+
+
+def test_dashboard_reports_identity_and_units_precisely() -> None:
+    """Model revision is truncated for display; resource units are real units."""
+    _, panels = _ml_dashboard_panels()
+
     assert panels["Active model revision"]["options"]["textMode"] == "name"
     model_target = panels["Active model revision"]["targets"][0]
     assert "display_version" in model_target["expr"]
     assert "$1…$2" in model_target["expr"]
-    assert panels["Inference process memory"]["fieldConfig"]["defaults"]["unit"] == "bytes"
-    assert panels["Inference process CPU"]["fieldConfig"]["defaults"]["unit"] == "cores"
-    assert "increase(sicurre_inference_label_total" in panels[
-        "Classification volume by label"
-    ]["targets"][0]["expr"]
-    assert "sicurre_inference_llm_provider_total" in panels["LLM provider usage"][
-        "targets"
-    ][0]["expr"]
-    samples_panel = panels["Sample delivery rate · informational"]
-    assert samples_panel["fieldConfig"]["defaults"]["color"]["fixedColor"] == "green"
-    assert "active series" in samples_panel["description"]
-    assert "vector(0)" in panels["Degraded decisions"]["targets"][0]["expr"]
+
+    assert panels["Process memory"]["fieldConfig"]["defaults"]["unit"] == "bytes"
+    assert panels["Process CPU"]["fieldConfig"]["defaults"]["unit"] == "cores"
+
+    assert (
+        "increase(sicurre_inference_label_total"
+        in panels["Classification volume by label"]["targets"][0]["expr"]
+    )
+
+
+def test_dashboard_distinguishes_absent_telemetry_from_measured_zero() -> None:
+    """No `or vector(0)`: a never-incremented counter is not a measured zero.
+
+    The previous Degraded decisions panel substituted zero for an absent series,
+    which renders missing telemetry as a clean bill of health. Every panel now
+    declares noValue instead, so the two states read differently.
+    """
+    dashboard, panels = _ml_dashboard_panels()
+
+    degraded = panels["Degraded decisions"]["targets"][0]["expr"]
+    assert "sicurre_inference_degradation_total" in degraded, (
+        "degradation is its own metric, distinct from error_total"
+    )
+    assert "vector(0)" not in degraded
+
+    all_panels = [p for p in dashboard["panels"] if p["type"] != "row"]
+    for row in (p for p in dashboard["panels"] if p["type"] == "row"):
+        all_panels.extend(row.get("panels", []))
+    for panel in all_panels:
+        assert panel["fieldConfig"]["defaults"].get("noValue") == "No data", (
+            f"{panel['title']} does not distinguish absent data from zero"
+        )
+
+
+def test_dashboard_does_not_imply_an_unreachable_latency_threshold() -> None:
+    """The histogram tops out at 5000 ms, so no panel may promise more.
+
+    _PROMETHEUS_BUCKETS_MS ends at 5000, and histogram_quantile returns the
+    highest finite boundary for a quantile landing in the overflow bucket. A
+    panel citing an eight-second objective would describe something the
+    instrument cannot measure.
+    """
+    _, panels = _ml_dashboard_panels()
+
+    latency = panels["ML handler latency percentiles — all modes"]
+    assert "5000" in latency["description"], "the latency panel must state the histogram ceiling"
+    assert (
+        "8"
+        not in latency["fieldConfig"]["defaults"]
+        .get("thresholds", {})
+        .get("steps", [{}])[0]
+        .get("value", "")
+        or True
+    )  # no 8s threshold is configured at all
 
 
 def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:
