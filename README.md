@@ -2,7 +2,7 @@
 
 # Sicurre&nbsp;ML
 
-**Three-class French email classifier — phishing · spam · legitimate**
+**Three-class French email classifier: phishing · spam · legitimate**
 
 Training pipeline, evaluation gates, and the ONNX inference service behind
 [Sicurre](https://github.com/MichAdebayo/sicurre).
@@ -44,7 +44,7 @@ flowchart TB
         ING["Ingestion + normalization"] --> FROZEN["Frozen dataset export"]
     end
 
-    FROZEN -->|"R2 — dataset boundary"| SYNC["Dataset sync"]
+    FROZEN -->|"R2 dataset boundary"| SYNC["Dataset sync"]
 
     subgraph ML["sicurre-ml"]
         SYNC --> KAGGLE["Kaggle training run<br/>CamemBERTaV2 · 4 epochs"]
@@ -92,13 +92,16 @@ The service **is instrumented**: `/v1/classify` emits a structured log line per
 request (`emit_classify_request_log`) carrying `latency_ms` and
 `stage_latencies_ms`, shipped by Grafana Alloy and rendered as p95 latency,
 error rate, degraded decisions, and provider usage. What is not yet established
-is whether observed traffic is representative or whether the targets below are
-attained over a full window — they were set from deployed alert thresholds and
-enforced timeouts, not derived from production distribution.
+is whether observed traffic is representative. Alert thresholds, configurable
+timeouts, and measured latency describe different things. They do not establish
+a customer-facing latency guarantee.
 
-`blocklist` checks a local PhishTank set by default. VirusTotal enrichment is
-opt-in per request (`use_virustotal`, default `false`) and makes a live API call
-with a 10 s timeout, so it materially changes latency when enabled.
+`blocklist` checks two local sources: the PhishTank set ingested by the data
+platform, and `FRENCH_DARK_DOMAINS`, a curated set of French impersonation
+patterns for institutions and brands that phishing campaigns imitate. Both are
+in-process lookups. VirusTotal enrichment is opt-in per request
+(`use_virustotal`, default `false`) and makes a live API call with a 10 s
+timeout, so it materially changes latency when enabled.
 
 The LLM stage is dispatched to a thread pool and joined before scoring, so it
 gates total latency. **When the whole provider chain fails, the pipeline records
@@ -107,44 +110,38 @@ service keeps working when the providers do not.
 
 ## Performance
 
-**Two seconds, end to end.** That is the commitment on the homepage, and the
-measurements support it with room to spare.
+Authenticated smoke checks on 2 September 2026 exercised the running local and
+production services, both with and without the LLM stage. All 12 timed requests
+returned HTTP 200. The measured timings and their limitations are recorded in
+[performance and quality](docs/architecture/performance.md), with the individual
+observations retained as machine-readable evidence.
 
-An email reaches a verdict through three hops — Cloudflare Email Worker →
-`sicurre /v1/email/scan` → `sicurre-ml /v1/classify`. Measured 2 September 2026
-against the production model (v15):
+These checks demonstrate that the tested inference requests completed. They do
+not establish end-to-end email delivery time, sustained capacity, classification
+accuracy, or a two-second guarantee. The Cloudflare Email Worker currently
+requests LLM-enabled classification, so LLM-disabled timings cannot stand in for
+that delivery path.
 
-| What | Median | Notes |
-|------|--------|-------|
-| `/v1/email/scan` hop | 393 ms | From a laptop over the public internet |
-| `/v1/classify` hop, all four stages | 426 ms | From a laptop over the public internet |
-| Classification compute alone | **3 ms** | No network; 36 ms p95 |
-| `rules` / `blocklist` stages | 0.001 ms | In-process |
-
-Adding the two internet hops naively gives **≈ 820 ms — under half the budget**,
-and that is the pessimistic reading. Roughly 250–400 ms of each is laptop-to-
-Germany round trip; the real path runs from Cloudflare's edge and then across a
-single machine. The work itself is three milliseconds.
-
-The exception is the LLM stage, allowed 7.5 s (Mistral then Groq). It is not
-meant to fit two seconds — it is the slower second opinion, and fast requests
-run with `use_llm=false`.
-
-Full detail, including what the number 8 in the alerts actually means, is in
-[performance and quality](docs/architecture/performance.md).
+The configured 8-second alert is an operational threshold, not an SLA. Its
+current histogram limitation is documented alongside the measurements.
 
 ## API surface
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| `GET` | `/health`, `/v1/health` | — | Liveness |
-| `GET` | `/v1/ready` | — | 200 when model loaded, 503 while downloading |
-| `GET` | `/v1/metrics` | — | Plain-text metrics |
+| `GET` | `/health`, `/v1/health` | None | Liveness |
+| `GET` | `/v1/ready` | None | 200 when model loaded, 503 when not ready |
+| `GET` | `/v1/metrics` | Internal network | Plain-text metrics; blocked by the public reverse proxy |
 | `POST` | `/v1/classify` | Bearer | Classify an email |
 | `GET` | `/v1/manifest` | Bearer | Deployed model identity |
 
 Rate limiting defaults to 1 rps sustained with a burst of 5
 (`INFERENCE_RATE_LIMIT_RPS`, `INFERENCE_RATE_LIMIT_BURST`).
+
+The manifest maps the human-readable `model.version` to the loaded immutable
+Hugging Face `model.revision`. Service version, training dataset version, and
+container digest remain separate identities. See
+[deployment identity](docs/architecture/deployment-identity.md).
 
 ## Model and training
 
@@ -153,18 +150,18 @@ Rate limiting defaults to 1 rps sustained with a burst of 5
 | Base model | `almanach/camembertav2-base` |
 | Labels | `phishing=0` · `spam=1` · `legitimate=2` |
 | Max sequence length | 256 tokens |
-| Epochs | **4** — standardised; see below |
+| Epochs | **4**, standardised; see below |
 | Batch size · LR | 8 · 2e-5 |
 | Class weighting | `inverse_freq` |
 | Serving format | ONNX |
 
 **On the epoch count.** Four is the standing choice, matching the budget the
-incumbent was trained with so candidates are comparable rather than
-systematically undertrained. Three was tried on the 1 September corpus and
-measured *significantly worse*: weighted F1 0.7141 against 0.8515, with
+incumbent was trained with. A three-epoch candidate on the 1 September corpus
+measured worse: weighted F1 0.7141 against 0.8515, with
 phishing recall identical at 0.8810 and legitimate false positives rising from
-8 to 20 (McNemar p = 0.0018). Detection was unchanged; discrimination
-collapsed. Do not lower it without repeating that measurement.
+8 to 20 (reported McNemar p = 0.0018). This comparison does not isolate epoch
+count as the cause. Changes to training settings require a controlled comparison
+and the normal promotion evaluation.
 
 ## Promotion
 
@@ -175,11 +172,12 @@ immutable candidate and never advances a production pointer on its own.
 2. Export ONNX, upload to Hugging Face, resolve the immutable commit SHA
 3. Evaluate candidate *and* incumbent on the **same** golden-set version
 4. Write a machine-readable promotion manifest
-5. Human approves the protected `production` environment — the single manual act
+5. Passing evaluation invokes promotion; a human reviews evidence and approves the `production` environment when required reviewers are configured
 6. Move MLflow alias and HF tag, pin and restart the server, validate, callback
 
-Any post-approval failure restores every preserved pointer and sends a
-`rolled_back` callback. Full policy: [docs/model/promotion-policy.md](docs/model/promotion-policy.md).
+Failure handling attempts restoration of the preserved production pointers and
+records the outcome. Recovery must be verified, not assumed. Full policy:
+[docs/model/promotion-policy.md](docs/model/promotion-policy.md).
 
 ## Repository layout
 
@@ -194,7 +192,7 @@ Any post-approval failure restores every preserved pointer and sends a
 | `src/serving/` | FastAPI app, auth, rate limiting |
 | `src/registry/` | MLflow logging, Hugging Face publication |
 | `deploy/` | Compose files, nginx, Grafana Alloy |
-| `docs/` | Architecture, ADRs, runbooks — [index](docs/README.md) |
+| `docs/` | Architecture, ADRs, runbooks; [index](docs/README.md) |
 
 ## Quickstart
 
@@ -215,11 +213,11 @@ uv run uvicorn src.serving.app:app --reload --port 8000
 | Workflow | Trigger | Purpose |
 |----------|---------|---------|
 | `ci.yml` | PR, push | Lint, type-check, tests, coverage gate |
-| `cd.yml` | Push to `main` | Build image, deploy to Hetzner |
-| `train.yml` | Dispatch, dataset callback | Sync dataset, run Kaggle training |
+| `cd.yml` | Successful CI on `main`, or manual dispatch | Build image, deploy to Hetzner |
+| `train.yml` | Dispatch; selected `mlops` pushes validate only | Validate lineage; real dispatch syncs data and runs Kaggle training |
 | `evaluate-model.yml` | After training | Golden-set gate, candidate vs incumbent |
-| `promote-model.yml` | Approval | Move production pointers, validate, callback |
-| `release.yml` | Tag | Service release |
+| `promote-model.yml` | Manual dispatch or reusable workflow call with promotion evidence | Move production pointers, validate, callback |
+| `release.yml` | Push to `main` | Prepare or publish a service release through release-please |
 
 ## Documentation
 
@@ -227,6 +225,7 @@ uv run uvicorn src.serving.app:app --reload --port 8000
 |------|-------------|
 | Docs index | [docs/README.md](docs/README.md) |
 | **Performance and quality** | [docs/architecture/performance.md](docs/architecture/performance.md) |
+| Deployment identity | [docs/architecture/deployment-identity.md](docs/architecture/deployment-identity.md) |
 | Promotion policy | [docs/model/promotion-policy.md](docs/model/promotion-policy.md) |
 | Monitoring design | [docs/architecture/monitoring-design.md](docs/architecture/monitoring-design.md) |
 | Architecture decisions | [docs/adr/](docs/adr/) |
