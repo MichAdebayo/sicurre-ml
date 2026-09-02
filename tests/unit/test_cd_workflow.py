@@ -133,7 +133,7 @@ def test_dashboard_and_alerts_distinguish_app_from_alloy() -> None:
     assert 'service_name="sicurre-ml-alloy"' in alert_expressions["sicurre-ml-telemetry-scrape"]
 
 
-def _ml_dashboard_panels() -> dict:
+def _ml_dashboard_panels() -> tuple[dict, dict]:
     """Flatten the dashboard, including panels nested inside collapsed rows."""
     dashboard = json.loads(
         Path("deploy/grafana/dashboards/sicurre-ml-runtime.json").read_text(encoding="utf-8")
