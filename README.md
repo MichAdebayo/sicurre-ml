@@ -107,25 +107,30 @@ service keeps working when the providers do not.
 
 ## Performance
 
-**The bar is two seconds**, end to end, so mail never feels held up. Measured
-2 September 2026 against the production model (v15), without the LLM stage:
+**Two seconds, end to end.** That is the commitment on the homepage, and the
+measurements support it with room to spare.
 
-| Path | Median | p95 |
-|------|--------|-----|
-| `rules` stage alone | 0.001 ms | 0.01 ms |
-| `blocklist` stage alone (local list) | 0.001 ms | 0.01 ms |
-| Full classification, same machine | 3 ms | 36 ms |
-| Full classification, over the internet | 426 ms | 438 ms |
+An email reaches a verdict through three hops — Cloudflare Email Worker →
+`sicurre /v1/email/scan` → `sicurre-ml /v1/classify`. Measured 2 September 2026
+against the production model (v15):
 
-The model itself costs a few milliseconds; nearly all of the 426 ms is network
-and TLS between a laptop and the server. Comfortably inside two seconds.
+| What | Median | Notes |
+|------|--------|-------|
+| `/v1/email/scan` hop | 393 ms | From a laptop over the public internet |
+| `/v1/classify` hop, all four stages | 426 ms | From a laptop over the public internet |
+| Classification compute alone | **3 ms** | No network; 36 ms p95 |
+| `rules` / `blocklist` stages | 0.001 ms | In-process |
 
-The LLM stage is the exception — bounded at 7.5 s across Mistral then Groq, so
-it does not fit the bar. It is the slower, more accurate second opinion; when a
-request needs to be fast it runs with `use_llm=false`.
+Adding the two internet hops naively gives **≈ 820 ms — under half the budget**,
+and that is the pessimistic reading. Roughly 250–400 ms of each is laptop-to-
+Germany round trip; the real path runs from Cloudflare's edge and then across a
+single machine. The work itself is three milliseconds.
 
-Model quality, the rules for replacing the production model, and the operational
-context behind these numbers are in
+The exception is the LLM stage, allowed 7.5 s (Mistral then Groq). It is not
+meant to fit two seconds — it is the slower second opinion, and fast requests
+run with `use_llm=false`.
+
+Full detail, including what the number 8 in the alerts actually means, is in
 [performance and quality](docs/architecture/performance.md).
 
 ## API surface

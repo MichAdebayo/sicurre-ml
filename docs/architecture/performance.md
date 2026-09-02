@@ -10,35 +10,68 @@ it is a dashboard requirement.
 
 ## What was measured
 
-Measured 2 September 2026, against the production model (v15, Hugging Face
-revision `86e90dc5`), classifying French emails without the LLM stage.
+Measured 2 September 2026 against the production model (v15, Hugging Face
+revision `86e90dc5`), classifying French email.
 
-| Path | Median | p95 | Notes |
-|------|--------|-----|-------|
-| `rules` stage alone | 0.001 ms | 0.01 ms | 600 calls, in-process |
-| `blocklist` stage alone (local list) | 0.001 ms | 0.01 ms | 600 calls, in-process |
-| Full classify, same machine | 3 ms | 36 ms | 15 unique inputs, local server |
-| Full classify, over the internet | 426 ms | 438 ms | 10 requests to `api.sicurre.com` |
+### The full path
 
-The model itself costs a few milliseconds. Almost all of the 426 ms is network
-and TLS between a laptop and the Hetzner box — from inside the same network it
-would be far lower.
+An email reaches a verdict through three hops:
 
-**Comfortably inside the two-second bar**, with room to spare.
+```
+Cloudflare Email Worker  ->  sicurre  /v1/email/scan  ->  sicurre-ml  /v1/classify
+```
 
-Method: unique text per request so nothing could be served from cache, and the
-loaded model confirmed via `/v1/manifest` before timing.
+| Hop | Measured | How |
+|-----|----------|-----|
+| `/v1/email/scan` — network, app, database lookup | **393 ms** median (255–473) | 8 requests from a laptop over the public internet |
+| `/v1/classify` — network, plus all four pipeline stages | **426 ms** median (269–439) | 10 requests from a laptop over the public internet |
+| Classification compute alone, no network | **3 ms** median, 36 ms p95 | 15 unique inputs against a local server |
+| `rules` stage alone | 0.001 ms median | 600 in-process calls |
+| `blocklist` stage alone, local list | 0.001 ms median | 600 in-process calls |
 
-## What does not fit in two seconds
+**The full path is comfortably inside two seconds.** Even adding the two
+internet-measured hops naively — 393 + 426 ≈ 820 ms — leaves more than half the
+budget unused, and that is the pessimistic reading.
 
-The LLM stage. It is bounded at 7.5 seconds total
-(`LLM_TOTAL_TIMEOUT_SECONDS`, 2.5 s per provider) across a chain of Mistral then
-Groq. When it is switched on, a single classification can take several seconds —
-well past the bar.
+It is pessimistic because both figures were taken from a laptop in France to a
+server in Germany, where roughly 250–400 ms of each is simply network round
+trip. The real path does not look like that: the Cloudflare Worker runs at the
+edge, much closer to the server, and `/v1/email/scan` reaches `/v1/classify`
+across the same machine rather than the public internet. The work itself is
+3 milliseconds.
 
-This is worth knowing rather than acting on. The ONNX path is what meets the
-target; the LLM is the slower, more accurate second opinion. If a request needs
-to be fast, it runs with `use_llm=false`.
+So two seconds is not a number to be nervous about. It is roughly four times
+the measured worst case from the worst realistic vantage point.
+
+### The one thing that does not fit
+
+The LLM stage, when enabled, is allowed 7.5 seconds
+(`LLM_TOTAL_TIMEOUT_SECONDS`, 2.5 s per provider, Mistral then Groq). That does
+not fit a two-second budget and is not meant to — it is the slower, more careful
+second opinion. Requests that must be fast run with `use_llm=false`, which is
+the path measured above.
+
+### Where the number 8 comes from
+
+It appears in the Grafana alerts as *"LLM inference p95 above 8s"*. It is an
+alarm threshold, not a promise and not a timeout: it sits just above the LLM's
+own 7.5-second budget so that a page fires when the chain overruns. For
+completeness, the related numbers are:
+
+| Value | What it is |
+|-------|------------|
+| 7.5 s | What the code allows the LLM chain |
+| 8 s | The alert that fires when the LLM p95 exceeds that |
+| 10 s | When the Cloudflare Worker stops waiting and delivers anyway |
+
+None of these describe the ONNX path, which is what the two-second figure covers.
+
+### Method
+
+Unique text on every request so nothing could be served from a cache, and the
+loaded model confirmed through `/v1/manifest` before timing. All timing ran from
+throwaway scripts outside the repository — no source was changed to produce a
+number.
 
 ## Model quality
 
