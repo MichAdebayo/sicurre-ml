@@ -48,7 +48,7 @@ latency. When the whole provider chain fails the pipeline records
 `llm_unavailable` in `degraded_reasons` and still returns a verdict from the
 remaining stages. That degradation is deliberate and is tracked as its own
 service-level indicator rather than as an availability failure — see
-[service levels](service-levels.md).
+[performance](performance.md).
 
 ## Branch discipline
 

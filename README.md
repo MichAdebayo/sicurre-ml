@@ -102,48 +102,31 @@ with a 10 s timeout, so it materially changes latency when enabled.
 
 The LLM stage is dispatched to a thread pool and joined before scoring, so it
 gates total latency. **When the whole provider chain fails, the pipeline records
-`llm_unavailable` and still returns a verdict from the remaining stages.** That
-graceful degradation is why an LLM outage is a quality event, not an
-availability incident — see [Service levels](docs/architecture/service-levels.md).
+`llm_unavailable` and still returns a verdict from the remaining stages.** The
+service keeps working when the providers do not.
 
-## Service levels
+## Performance
 
-Full specification: **[docs/architecture/service-levels.md](docs/architecture/service-levels.md)**
+**The bar is two seconds**, end to end, so mail never feels held up. Measured
+2 September 2026 against the production model (v15), without the LLM stage:
 
-| Plane | Objective | Target |
-|-------|-----------|--------|
-| Serving | Readiness (`/v1/ready` 200) | 99.0% / 30 d — **SLA 98.5%** |
-| Serving | Request success (non-5xx) | 99.0% / 30 d |
-| Serving | `mode=local` p95 | < 1 s |
-| Serving | `mode=llm` p95 | < 8 s |
-| Serving | Degraded ratio (of `mode=llm`) | < 10% |
-| Model | Weighted F1 | ≥ incumbent (**0.8515**) |
-| Model | Phishing recall | ≥ incumbent (**0.8810**) — never regress |
-| Model | Legitimate false positives | ≤ incumbent (**8** of 42) |
-| Pipeline | Lineage completeness | 100% of promotions |
-| Pipeline | Rollback time | < 15 min |
+| Path | Median | p95 |
+|------|--------|-----|
+| `rules` stage alone | 0.001 ms | 0.01 ms |
+| `blocklist` stage alone (local list) | 0.001 ms | 0.01 ms |
+| Full classification, same machine | 3 ms | 36 ms |
+| Full classification, over the internet | 426 ms | 438 ms |
 
-The deployment is a single node with no failover, and the targets are set to be
-honest about that rather than aspirational.
+The model itself costs a few milliseconds; nearly all of the 426 ms is network
+and TLS between a laptop and the server. Comfortably inside two seconds.
 
-**`local`, `llm`, and degraded are three different things.** `local`
-(`use_llm=false`) skips the LLM entirely and is fast by choice. `llm` runs the
-chain, hard-bounded at 7.5 s. A *degraded* response is an `llm` request whose
-providers all failed — it has already spent that deadline waiting, so it is slow
-and low-confidence, the opposite of `local`. Reporting the two together would
-hide a provider outage inside a healthy-looking latency number.
+The LLM stage is the exception — bounded at 7.5 s across Mistral then Groq, so
+it does not fit the bar. It is the slower, more accurate second opinion; when a
+request needs to be fast it runs with `use_llm=false`.
 
-The SLA carries consequences, not just a threshold: a breach opens an incident
-and **freezes model promotion** until the service is back inside its objectives
-for seven consecutive days.
-
-> **The `mode=llm` 8 s figure is a current ceiling, not a target.**
-> Classification is synchronous on the mail delivery path — a Cloudflare Email
-> Worker waits for the verdict before forwarding, and sends `use_llm: true`. A
-> slow LLM therefore delays delivery and, because the Worker fails open,
-> silently delivers unscanned mail. An 8 s budget is not defensible there. See
-> [the delivery-path constraint](docs/architecture/service-levels.md#the-delivery-path-constraint)
-> for the nested timeouts and the three ways to close the gap.
+Model quality, the rules for replacing the production model, and the operational
+context behind these numbers are in
+[performance and quality](docs/architecture/performance.md).
 
 ## API surface
 
@@ -238,7 +221,7 @@ uv run uvicorn src.serving.app:app --reload --port 8000
 | Area | Entry point |
 |------|-------------|
 | Docs index | [docs/README.md](docs/README.md) |
-| **Service levels (SLI/SLO/SLA)** | [docs/architecture/service-levels.md](docs/architecture/service-levels.md) |
+| **Performance and quality** | [docs/architecture/performance.md](docs/architecture/performance.md) |
 | Promotion policy | [docs/model/promotion-policy.md](docs/model/promotion-policy.md) |
 | Monitoring design | [docs/architecture/monitoring-design.md](docs/architecture/monitoring-design.md) |
 | Architecture decisions | [docs/adr/](docs/adr/) |

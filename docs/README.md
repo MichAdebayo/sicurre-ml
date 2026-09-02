@@ -11,7 +11,7 @@ levels at a glance.
 
 | Document | Why it matters |
 |----------|----------------|
-| [Service levels (SLI/SLO/SLA)](architecture/service-levels.md) | The single source of numeric truth. Every dashboard panel, alert rule, and promotion gate should trace back to a row here |
+| [Performance and quality](architecture/performance.md) | What the system actually measures, and what has to be true before a new model ships |
 | [Promotion policy](model/promotion-policy.md) | How a candidate becomes production, and what makes a promotion refuseable |
 | [Monitoring design](architecture/monitoring-design.md) | What is observed at runtime and why each signal was chosen |
 
@@ -19,7 +19,7 @@ levels at a glance.
 
 | Document | Scope |
 |----------|-------|
-| [Service levels](architecture/service-levels.md) | SLIs, SLOs, error budgets, the SLA offered to `sicurre` |
+| [Performance and quality](architecture/performance.md) | Measured latency, the two-second bar, and the rules for replacing the production model |
 | [Component design](architecture/component-design.md) | Module boundaries and the split with the companion repo |
 | [Non-functional requirements](architecture/non-functional-requirements.md) | Qualities the system must hold; numbers live in service levels |
 | [Monitoring design](architecture/monitoring-design.md) | Runtime signals, log schema, alerting targets |
@@ -81,5 +81,5 @@ maps deliverables to competency criteria. Per-competency notes are in
 - Operational runbooks and architecture contracts stay in the repo.
 - Secrets, tokens, and provider credentials never enter version control.
 - Dataset samples are private unless explicitly sanitized for documentation.
-- Numeric targets belong in [service levels](architecture/service-levels.md) and
-  are referenced from elsewhere, never restated — restated numbers drift.
+- Measured numbers belong in [performance](architecture/performance.md) and are
+  referenced from elsewhere, never restated — restated numbers drift.

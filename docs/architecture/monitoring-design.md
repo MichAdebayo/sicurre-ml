@@ -146,7 +146,7 @@ Planned fields:
 
 Authoritative list, matching what is deployed in
 `deploy/grafana/alerts/sicurre-ml-alerts.json`. Objectives these map to are in
-[service levels](service-levels.md).
+[performance](performance.md).
 
 | Condition | Threshold |
 |-----------|-----------|
@@ -160,9 +160,8 @@ Authoritative list, matching what is deployed in
 | Telemetry scrape unavailable / Alloy dropping entries | — |
 | Active series above budget | 2100 / 2550 |
 
-The error-rate alert fires at 2% while the success objective budgets 1%, so it
-confirms a breach rather than warning of one — see the known gap in
-[service levels](service-levels.md#known-gap).
+These are the thresholds the alerts actually use. Measured latency figures are
+in [performance](performance.md).
 
 ---
 

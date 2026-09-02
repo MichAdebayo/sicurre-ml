@@ -1,7 +1,7 @@
 # Non-Functional Requirements
 
 Qualities the system must hold. **Numeric targets are not restated here** —
-they live in [service levels](service-levels.md) and are referenced from it, so
+they live in [performance](performance.md) and are referenced from it, so
 there is one place to change a number and no chance of two documents disagreeing.
 
 ## Model quality
