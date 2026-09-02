@@ -3,10 +3,23 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.config.training_config import RuntimeState, TrainingConfig
 from src.registry.tags import model_version_tag_key
+
+if TYPE_CHECKING:  # pragma: no cover - types only, never imported at runtime
+    # Deferred deliberately. Importing these at module level pulls in
+    # training_config, which imports torch, and every consumer of any module in
+    # this package pays for it - including .github/scripts/promote_model.py,
+    # which needs one stdlib-only function from src.registry.callbacks and runs
+    # in a job that installs no ML dependencies.
+    #
+    # That is not hypothetical: the first promotion ever attempted died here
+    # with ModuleNotFoundError: No module named 'torch', after the approval and
+    # before any pointer moved. Both names are used only in annotations, and
+    # `from __future__ import annotations` above means those are never
+    # evaluated, so nothing is lost by deferring them.
+    from src.config.training_config import RuntimeState, TrainingConfig
 
 
 def setup_mlflow(runtime_state: RuntimeState) -> str:
@@ -61,9 +74,7 @@ def register_model(
     # Only point at Unity Catalog when those env vars are actually present;
     # otherwise log the model locally without registering (no hard crash on
     # runs where Databricks secrets have not been configured in Kaggle).
-    has_databricks = bool(
-        os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
-    )
+    has_databricks = bool(os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN"))
     if has_databricks:
         mlflow.set_registry_uri("databricks-uc")
         registered_name: str | None = model_name
@@ -97,9 +108,7 @@ def stage_candidate(
     run_id: str | None = None,
 ) -> None:
     """Assign the MLflow candidate alias without changing production."""
-    has_databricks = bool(
-        os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN")
-    )
+    has_databricks = bool(os.environ.get("DATABRICKS_HOST") and os.environ.get("DATABRICKS_TOKEN"))
     if not has_databricks:
         print("[registry] Databricks credentials not found — skipping candidate alias.")
         return
@@ -126,9 +135,7 @@ def stage_candidate(
     if run_id:
         client.set_tag(run_id, "sicurre.model.stage", "candidate")
         if semantic_version:
-            client.set_tag(
-                run_id, "sicurre.model.semantic_version", semantic_version
-            )
+            client.set_tag(run_id, "sicurre.model.semantic_version", semantic_version)
             client.set_tag(
                 run_id,
                 "mlflow.runName",
@@ -205,14 +212,12 @@ def export_to_onnx(
             super().__init__()
             self.m = m
 
-        def forward(
-            self, input_ids: torch.Tensor, attention_mask: torch.Tensor
-        ) -> torch.Tensor:
+        def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
             return self.m(input_ids=input_ids, attention_mask=attention_mask).logits
 
     wrapper = _LogitsWrapper(model)
     max_length = 256
-    dummy_ids  = torch.ones(1, max_length, dtype=torch.long)
+    dummy_ids = torch.ones(1, max_length, dtype=torch.long)
     dummy_mask = torch.ones(1, max_length, dtype=torch.long)
 
     print(f"[onnx-export] Exporting to ONNX (opset={opset}) ...")
@@ -225,9 +230,9 @@ def export_to_onnx(
             input_names=["input_ids", "attention_mask"],
             output_names=["logits"],
             dynamic_axes={
-                "input_ids":      {0: "batch_size", 1: "sequence_length"},
+                "input_ids": {0: "batch_size", 1: "sequence_length"},
                 "attention_mask": {0: "batch_size", 1: "sequence_length"},
-                "logits":         {0: "batch_size"},
+                "logits": {0: "batch_size"},
             },
         )
     print(f"[onnx-export] Written to {stable_path}")
