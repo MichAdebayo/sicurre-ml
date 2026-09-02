@@ -12,6 +12,7 @@ from src.config.training_config import load_secrets
 from src.evaluation.golden_set import (
     GoldenSetReference,
     evaluate_golden_set,
+    latest_golden_set,
     load_approved_golden_set,
 )
 from src.evaluation.hub_onnx import HubTransformersPredictor
@@ -20,9 +21,15 @@ from src.evaluation.retrieval import download_r2_object
 from src.registry.callbacks import post_provenance_callback
 from src.registry.tags import model_version_tag_key
 
-GOLDEN_VERSION = "golden-20260719-v1"
-GOLDEN_SHA256 = "bc329213cacddab409a63deb9d663e593351b6e740a45cdada4c201e3beea346"
-GOLDEN_KEY = "golden.jsonl"
+# Resolved at run time from the registry rather than pinned here, so a newly
+# published evaluation set is picked up without editing this script. The set
+# actually used is recorded on the MLflow run, so every promotion decision
+# still says which bar it was measured against.
+_GOLDEN = latest_golden_set()
+GOLDEN_VERSION = _GOLDEN.version
+GOLDEN_SHA256 = _GOLDEN.sha256
+GOLDEN_KEY = _GOLDEN.object_key
+GOLDEN_SCHEMA_VERSION = _GOLDEN.schema_version
 REGISTERED_MODEL_NAME = "main.sicurre.phishing-detector"
 
 
@@ -115,7 +122,7 @@ def main() -> None:
                 dataset_id="sicurre-golden",
                 version=GOLDEN_VERSION,
                 sha256=GOLDEN_SHA256,
-                schema_version="1",
+                schema_version=GOLDEN_SCHEMA_VERSION,
                 provenance="synthetic_provisional",
                 review_status="approved",
             ),
