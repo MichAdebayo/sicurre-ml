@@ -76,7 +76,7 @@ one weighted composite score.
 flowchart LR
     IN["Email text"] --> N["Normalize"]
     N --> O["onnx<br/>thread pool"]
-    N -.->|"if enabled"| L["llm<br/>thread pool<br/>Groq → Cerebras"]
+    N -.->|"if enabled"| L["llm<br/>thread pool<br/>Mistral → Groq"]
     N --> S["rules → blocklist<br/>main thread"]
     O --> C["Composite score"]
     L -.->|"may be absent"| C
@@ -88,9 +88,13 @@ flowchart LR
 `blocklist` run sequentially on the main thread while those are in flight, and
 the futures are joined before the composite is formed.
 
-**No production latency has been measured yet.** The structured request log in
-[monitoring design](docs/architecture/monitoring-design.md) is not implemented,
-so every latency figure in this repo is a target, not an observation.
+The service **is instrumented**: `/v1/classify` emits a structured log line per
+request (`emit_classify_request_log`) carrying `latency_ms` and
+`stage_latencies_ms`, shipped by Grafana Alloy and rendered as p95 latency,
+error rate, degraded decisions, and provider usage. What is not yet established
+is whether observed traffic is representative or whether the targets below are
+attained over a full window — they were set from deployed alert thresholds and
+enforced timeouts, not derived from production distribution.
 
 `blocklist` checks a local PhishTank set by default. VirusTotal enrichment is
 opt-in per request (`use_virustotal`, default `false`) and makes a live API call
@@ -110,9 +114,9 @@ Full specification: **[docs/architecture/service-levels.md](docs/architecture/se
 |-------|-----------|--------|
 | Serving | Readiness (`/v1/ready` 200) | 99.0% / 30 d — **SLA 98.5%** |
 | Serving | Request success (non-5xx) | 99.0% / 30 d |
-| Serving | ONNX stage p95 | < 500 ms |
-| Serving | Full-path p95 | < 8 s (LLM) · < 1 s (degraded) |
-| Serving | Degraded-mode rate | < 10% |
+| Serving | `mode=local` p95 | < 1 s |
+| Serving | `mode=llm` p95 | < 8 s |
+| Serving | Degraded ratio (of `mode=llm`) | < 10% |
 | Model | Weighted F1 | ≥ incumbent (**0.8515**) |
 | Model | Phishing recall | ≥ incumbent (**0.8810**) — never regress |
 | Model | Legitimate false positives | ≤ incumbent (**8** of 42) |
@@ -120,9 +124,18 @@ Full specification: **[docs/architecture/service-levels.md](docs/architecture/se
 | Pipeline | Rollback time | < 15 min |
 
 The deployment is a single node with no failover, and the targets are set to be
-honest about that rather than aspirational. **They are provisional**: they were
-set in advance rather than derived from observed distributions, and should be
-re-derived once the request log has thirty days of history.
+honest about that rather than aspirational.
+
+**`local`, `llm`, and degraded are three different things.** `local`
+(`use_llm=false`) skips the LLM entirely and is fast by choice. `llm` runs the
+chain, hard-bounded at 7.5 s. A *degraded* response is an `llm` request whose
+providers all failed — it has already spent that deadline waiting, so it is slow
+and low-confidence, the opposite of `local`. Reporting the two together would
+hide a provider outage inside a healthy-looking latency number.
+
+The SLA carries consequences, not just a threshold: a breach opens an incident
+and **freezes model promotion** until the service is back inside its objectives
+for seven consecutive days.
 
 ## API surface
 

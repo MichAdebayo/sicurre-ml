@@ -35,7 +35,7 @@ and combines them into one weighted composite:
 | `rules` | `rules.py` | Deterministic URL heuristics, main thread |
 | `blocklist` | `blocklist.py`, `phishtank_loader.py` | Local PhishTank lookup, main thread. Optional VirusTotal enrichment (`use_virustotal`, default off) makes a live API call with a 10 s timeout |
 | `onnx` | `onnx_classifier.py` | The trained model, the primary signal, dispatched to a thread pool |
-| `llm` | `llm_classifier.py` | Groq with Cerebras fallback, dispatched to a thread pool |
+| `llm` | `llm_classifier.py` | Mistral then Groq, sequential inside one 7.5 s deadline, dispatched to a thread pool. Cerebras is implemented but not in the chain |
 
 `onnx` and `llm` are submitted to their executors first; `rules` and then
 `blocklist` run sequentially on the main thread before the futures are joined.

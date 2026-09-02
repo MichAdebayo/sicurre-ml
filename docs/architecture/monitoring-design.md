@@ -40,8 +40,8 @@ Each of the four pipeline stages is timed independently:
 |------------|----------------|
 | `rules`    | Should be sub-millisecond; a spike indicates a regex change |
 | `blocklist`| Should be sub-millisecond; a spike indicates a slow TLD lookup |
-| `onnx`     | Target: <500 ms; a spike indicates memory pressure or session reload |
-| `llm`      | Target: <20 s; tracks Groq and Cerebras response times separately |
+| `onnx`     | Runs in its own thread pool; a spike indicates memory pressure or session reload |
+| `llm`      | Chain is Mistral then Groq, sequential inside one 7.5 s deadline (`LLM_TOTAL_TIMEOUT_SECONDS`), 2.5 s per provider. Cerebras is implemented but not in the chain |
 
 ### 3. Verdict distribution
 
@@ -58,8 +58,8 @@ as a histogram in Grafana.
 
 ### 5. LLM tier usage and fallback rate
 
-- Which LLM provider was used (`groq`, `cerebras`, or `none`)?
-- How often does Tier 1 (Groq) fail and fall back to Tier 2 (Cerebras)?
+- Which LLM provider was used (`mistral`, `groq`, or `none`)?
+- How often does Tier 1 (Mistral) fail and fall back to Tier 2 (Groq)?
 - How often does the whole LLM stage return `None` (both providers failed)?
 
 A spike in fallback rate signals API key expiry or a provider outage.
@@ -144,13 +144,25 @@ Planned fields:
 
 ## Alerting targets
 
-| Condition | Threshold | Action |
-|-----------|-----------|--------|
-| `/v1/ready` returns non-200 | > 2 consecutive minutes | Page on-call |
-| API error rate (5xx) | > 5% over 5 minutes | Page on-call |
-| LLM fallback rate | > 50% over 15 minutes | Alert — check API keys |
-| Verdict phishing rate | > 30% shift from 7-day baseline | Alert — check model drift |
-| ONNX latency p95 | > 2 s | Alert — check memory/CPU |
+Authoritative list, matching what is deployed in
+`deploy/grafana/alerts/sicurre-ml-alerts.json`. Objectives these map to are in
+[service levels](service-levels.md).
+
+| Condition | Threshold |
+|-----------|-----------|
+| Service unavailable / model not ready | — |
+| Local inference p95 (`mode=local`) | > 1000 ms |
+| LLM inference p95 (`mode=llm`) | > 8000 ms |
+| Server error rate | > 2% |
+| Authentication rejection spike | > 5 |
+| Rate-limit spike | > 10 |
+| Process memory | > 6 GiB |
+| Telemetry scrape unavailable / Alloy dropping entries | — |
+| Active series above budget | 2100 / 2550 |
+
+The error-rate alert fires at 2% while the success objective budgets 1%, so it
+confirms a breach rather than warning of one — see the known gap in
+[service levels](service-levels.md#known-gap).
 
 ---
 
@@ -160,6 +172,6 @@ Expected outputs for the monitoring delivery bloc:
 
 - this design document (public, certification-visible)
 - `deploy/alloy/config.alloy` — Alloy configuration wired to Grafana Cloud
-- structured JSON logging in `src/serving/app.py` and `src/inference/pipeline.py` (not yet implemented)
+- structured JSON logging in `src/serving/app.py` (`emit_classify_request_log`) — implemented
 - Grafana dashboard capturing verdict distribution, latency, and fallback rate
 - one documented incident example with root cause, fix, and linked evidence
