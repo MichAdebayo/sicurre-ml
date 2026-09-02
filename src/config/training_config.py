@@ -43,15 +43,21 @@ class TrainingConfig:
     batch_size: int = 8
     learning_rate: float = 2e-5
     weight_decay: float = 0.01
-    # Four, matching the epoch budget the incumbent (v15) was trained with, so
-    # candidates are comparable to it rather than systematically undertrained.
+    # Four. This is the standing choice, fixed by operator decision on
+    # 2026-09-02: every future run uses four so candidates stay on par with the
+    # epoch budget production was trained with, and are comparable to it rather
+    # than systematically undertrained. Changing it makes candidates
+    # incomparable to the incumbent, so treat it as a versioned decision rather
+    # than a knob.
     #
     # This was briefly lowered to three while training on a ~3x augmented corpus,
     # where three passes already exceed the samples a four-epoch run sees on the
     # base data. That reasoning does not carry over to base-sized datasets: a
     # three-epoch run on 26k rows sees 78k samples against the incumbent's 104k,
     # a 25% deficit that shows up as a weighted-F1 gap and gets misread as a
-    # worse recipe. Scale epochs to the corpus; do not carry a number across.
+    # worse recipe. The lesson is not "scale epochs to the corpus" - it is that
+    # sample count, not epoch count, is what makes two runs comparable, and
+    # holding epochs fixed at the incumbent's budget is how that is kept true.
     #
     # Three was tried on the 1 September corpus and measured significantly
     # worse. Candidate 1.0.28 (three epochs) against production v15 on the
