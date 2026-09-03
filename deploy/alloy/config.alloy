@@ -110,6 +110,46 @@ prometheus.scrape "sicurre_ml_app" {
 	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
 }
 
+// Probe the public HTTP route independently of the internal metrics endpoint.
+prometheus.exporter.blackbox "sicurre_ml_health" {
+	config = `modules:
+  health_json:
+    prober: http
+    timeout: 5s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      follow_redirects: false
+      preferred_ip_protocol: ip4
+      headers:
+        Cache-Control: no-cache
+      fail_if_body_not_matches_regexp: ['"status"\s*:\s*"ok"']
+`
+	target {
+		name    = "sicurre-ml-public-health"
+		address = sys.env("ML_HEALTH_PROBE_URL")
+		module  = "health_json"
+		labels  = { service_name = "sicurre-ml-health" }
+	}
+}
+
+prometheus.scrape "sicurre_ml_health" {
+	targets         = prometheus.exporter.blackbox.sicurre_ml_health.targets
+	scrape_interval = "60s"
+	scrape_timeout  = "10s"
+	forward_to      = [prometheus.relabel.sicurre_ml_health.receiver]
+}
+
+// Keep the probe's cardinality bounded; detailed exporter timings are not needed.
+prometheus.relabel "sicurre_ml_health" {
+	forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+	rule {
+		source_labels = ["__name__"]
+		regex = "up|scrape_samples_scraped|probe_success|probe_http_status_code|probe_duration_seconds"
+		action = "keep"
+	}
+}
+
 prometheus.remote_write "grafana_cloud" {
 	endpoint {
 		url = sys.env("GRAFANA_PROMETHEUS_REMOTE_WRITE_URL")

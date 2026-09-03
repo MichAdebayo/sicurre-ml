@@ -67,6 +67,7 @@ services:
       # Non-secret deployment setting. The server root .env may override it;
       # otherwise use the production telemetry-budget default.
       OTEL_TRACE_SAMPLE_PERCENT: ${OTEL_TRACE_SAMPLE_PERCENT:-10}
+      ML_HEALTH_PROBE_URL: ${ML_HEALTH_PROBE_URL:-https://api.sicurre.com/v1/health}
     volumes:
       - ./deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro
       # Docker socket: needed for Alloy to discover container log paths.
