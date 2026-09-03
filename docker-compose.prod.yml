@@ -73,7 +73,16 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # /var/lib/docker/containers: needed to read container log files.
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+      # Alloy's own state, on a named volume so it survives --force-recreate.
+      # Without it, loki.source.docker loses its read positions on every
+      # deploy and re-ships the app's retained json-file history (up to
+      # 5 x 50 MB). Those entries carry their original timestamps, so Loki
+      # rejects them as too old and loki_write_dropped_entries_total climbs.
+      - alloy_data:/var/lib/alloy/data
+    command: >-
+      run --server.http.listen-addr=0.0.0.0:12345
+      --storage.path=/var/lib/alloy/data
+      /etc/alloy/config.alloy
     depends_on:
       - app
     networks:
@@ -88,6 +97,7 @@ services:
 
 volumes:
   onnx_cache:
+  alloy_data:
 
 networks:
   sicurre-ml-internal:
