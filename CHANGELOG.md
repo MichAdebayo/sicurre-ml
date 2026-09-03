@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.3.0...v0.4.0) (2026-09-03)
+
+
+### Features
+
+* **grafana:** rebuild the ML dashboard around a readable first view ([#154](https://github.com/MichAdebayo/sicurre-ml/issues/154)) ([14ff6ff](https://github.com/MichAdebayo/sicurre-ml/commit/14ff6ff3c935fbf0c756e8c6c804573b642c4d41))
+* **manifest:** document what each runtime identity field means ([#155](https://github.com/MichAdebayo/sicurre-ml/issues/155)) ([e64cdab](https://github.com/MichAdebayo/sicurre-ml/commit/e64cdab45230fe7d1482d7771dd1221cc1efe9ab))
+
+
+### Bug Fixes
+
+* **promotion:** stop the promotion path importing the training stack ([#151](https://github.com/MichAdebayo/sicurre-ml/issues/151)) ([3578267](https://github.com/MichAdebayo/sicurre-ml/commit/3578267eba3042aee94049b4a1fc7b2d67f6152f))
+
 ## [0.3.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.2.0...v0.3.0) (2026-09-02)
 
 
