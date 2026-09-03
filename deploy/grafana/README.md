@@ -35,9 +35,11 @@ datasources are neither required nor provisioned.
 
 ## Dashboard semantics
 
-The first view separates service/telemetry health, period inference statistics,
-four charts and current resource usage. Reliability and resource histories are
-collapsed below it. Current health is never inferred from historical traffic.
+The first view presents four roomy period-inference cards above four charts.
+Service health, resources and reliability have separate expandable sections
+below it. Health includes public HTTP, metrics scraping, model readiness, Alloy,
+sample age and model revision; resources includes the active-series budget.
+Current health is never inferred from historical traffic.
 P50/P95 cards aggregate histogram observations across the selected period and
 all requested modes, not averages of plotted quantiles. They measure ML handler
 duration, not email delivery, and remain neutral because mode SLOs differ.

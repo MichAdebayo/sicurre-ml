@@ -8,7 +8,10 @@ import yaml
 
 def _panels() -> dict[str, dict]:
     dashboard = json.loads(Path("deploy/grafana/dashboards/sicurre-ml-runtime.json").read_text())
-    return {panel["title"]: panel for panel in dashboard["panels"] if panel["type"] != "row"}
+    panels = [panel for panel in dashboard["panels"] if panel["type"] != "row"]
+    for row in (panel for panel in dashboard["panels"] if panel["type"] == "row"):
+        panels.extend(row["panels"])
+    return {panel["title"]: panel for panel in panels}
 
 
 def test_public_health_is_an_http_probe_not_a_json_metrics_scrape() -> None:
@@ -49,6 +52,8 @@ def test_health_panels_use_fresh_observations_and_distinct_unknown_states() -> N
         assert "timestamp(" in expr and "time() - 180" in expr
         assert "vector(3)" in expr
         mappings = panel["fieldConfig"]["defaults"]["mappings"][0]["options"]
+        assert mappings["0"]["text"] == "Down"
+        assert mappings["1"]["text"] == "Up"
         assert mappings["2"]["text"] == "Stale"
         assert mappings["3"]["text"] == "Unknown"
         assert mappings["3"]["color"] == "text"
@@ -58,7 +63,7 @@ def test_health_panels_use_fresh_observations_and_distinct_unknown_states() -> N
 
 def test_percentiles_summarize_period_histograms_without_filling_empty_samples() -> None:
     panels = _panels()
-    for title, quantile in (("P50 latency", "0.5"), ("P95 latency", "0.95")):
+    for title, quantile in (("P50", "0.5"), ("P95", "0.95")):
         panel = panels[title]
         expr = panel["targets"][0]["expr"]
         assert f"histogram_quantile({quantile}," in expr
@@ -85,10 +90,15 @@ def test_budget_colors_match_strict_greater_than_alert_boundaries() -> None:
     assert probe["no_data"] == "Alerting" and probe["for"] == "2m"
 
 
-def test_first_view_separates_health_activity_and_resources_without_overlap() -> None:
+def test_first_view_uses_roomy_cards_and_separate_diagnostic_sections() -> None:
     dashboard = json.loads(Path("deploy/grafana/dashboards/sicurre-ml-runtime.json").read_text())
     visible = [p for p in dashboard["panels"] if p["type"] != "row"]
     assert len({p["id"] for p in visible}) == len(visible)
+    cards = [p for p in visible if p["type"] == "stat"]
+    assert len(cards) == 4
+    assert all(p["gridPos"]["w"] >= 6 and p["gridPos"]["h"] >= 4 for p in cards)
+    rows = {p["title"]: p for p in dashboard["panels"] if p["type"] == "row"}
+    assert rows["Service health"]["collapsed"] and rows["Resources"]["collapsed"]
     for panel in visible:
         if panel["type"] == "bargauge":
             assert panel["gridPos"]["h"] >= 4, "All three categories must remain visible"
