@@ -127,6 +127,12 @@ current histogram limitation is documented alongside the measurements.
 
 ## API surface
 
+Local reference: start with `DEPLOYMENT_ENV=development make serve-reload`,
+then open `http://127.0.0.1:8000/docs` (or `/redoc`). The raw schema is at
+`/openapi.json`. These HTTP documentation routes are disabled outside local
+development; production Compose explicitly pins `DEPLOYMENT_ENV=production`.
+The checked-in contract and `make openapi-check` remain unchanged.
+
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | `GET` | `/health`, `/v1/health` | None | Liveness |

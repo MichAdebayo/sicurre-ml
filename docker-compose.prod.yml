@@ -28,6 +28,7 @@ services:
       - "127.0.0.1:8001:8000"
     env_file: .env
     environment:
+      DEPLOYMENT_ENV: production
       # huggingface_hub writes lock/temp files to $HF_HOME.
       # The sicurre system user has no home dir, so redirect to the writable cache volume.
       HF_HOME: "/tmp/sicurre_onnx"
