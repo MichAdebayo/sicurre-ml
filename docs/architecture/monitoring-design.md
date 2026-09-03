@@ -121,10 +121,33 @@ They include readiness/availability, latency, server errors, authentication
 and rate-limit spikes, memory pressure, scrape health, dropped logs, and ML
 active-series budget warnings.
 
-The current LLM-mode request p95 alert cannot be validated as intended because
-the histogram's largest finite bucket is below its threshold. See the exact
-values and explanation in [performance](performance.md). A configured rule is
-not evidence of successful firing, notification delivery, or on-call coverage.
+Both latency rules are now answerable. They were not: buckets ended at 5000 ms
+while the LLM rule asked about 8000 ms, and `histogram_quantile` returns the
+highest finite boundary for any quantile in the overflow bucket, so the query
+could not produce a value exceeding the threshold however slow the service
+became. Buckets were re-cut around the 2 s objective and the rule re-pointed at
+2 s; a test binds the two so they cannot drift apart again. A configured rule
+is still not evidence of successful firing, notification delivery, or on-call
+coverage.
+
+### Dropped log entries after a deploy
+
+`loki_write_dropped_entries_total` climbed after each deploy — 55 rejections on
+3 September — with Loki answering HTTP 400 "timestamp too old".
+
+The cause was not the write-ahead log. Alloy had no `--storage.path`, so all of
+its state, the WAL included, sat in the container's writable layer and was
+destroyed by `--force-recreate` on every deploy. What actually replayed was
+`loki.source.docker`: with its read positions gone it re-read the app's
+retained json-file history, up to five files of 50 MB, and re-shipped entries
+carrying their original timestamps. Loki rejected them as too old.
+
+The distinction matters because the obvious fix — truncating the WAL on
+restart — would have changed nothing; the WAL was already being destroyed. The
+fix is a named volume at `/var/lib/alloy/data` with an explicit
+`--storage.path`, so positions survive and Alloy resumes instead of replaying.
+One further replay is expected on the first deploy after this change, since the
+volume starts empty.
 
 Evaluate window length and sample count when interpreting alerts. The
 server-error expression clamps a small denominator, so at very low traffic it
