@@ -158,6 +158,7 @@ jobs:
             --env GRAFANA_OPEN_TELEMETRY_API_TOKEN=test \
             --env GRAFANA_OPEN_TELEMETRY_OTLP_ENDPOINT=http://example.invalid/otlp \
             --env OTEL_TRACE_SAMPLE_PERCENT=10 \
+            --env ML_HEALTH_PROBE_URL=http://127.0.0.1:9/v1/health \
             --publish 127.0.0.1:12345:12345 \
             --volume "$PWD/deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro" \
             grafana/alloy:v1.16.1@sha256:51aeb9d829239345070619dad3edd6873186f913c84f45b365b74574fcb38ec0 \
