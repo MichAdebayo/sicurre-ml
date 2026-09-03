@@ -5,15 +5,13 @@
 
 ### Features
 
-* **grafana:** rebuild the ML dashboard and record runtime identity ([e64cdab](https://github.com/MichAdebayo/sicurre-ml/commit/e64cdab45230fe7d1482d7771dd1221cc1efe9ab))
 * **grafana:** rebuild the ML dashboard around a readable first view ([#154](https://github.com/MichAdebayo/sicurre-ml/issues/154)) ([14ff6ff](https://github.com/MichAdebayo/sicurre-ml/commit/14ff6ff3c935fbf0c756e8c6c804573b642c4d41))
+* **manifest:** document what each runtime identity field means ([#155](https://github.com/MichAdebayo/sicurre-ml/issues/155)) ([e64cdab](https://github.com/MichAdebayo/sicurre-ml/commit/e64cdab45230fe7d1482d7771dd1221cc1efe9ab))
 
 
 ### Bug Fixes
 
-* **promotion:** stop the promotion path importing the training stack ([0b7b0de](https://github.com/MichAdebayo/sicurre-ml/commit/0b7b0de0a6603ebf9a9cf40a5818104c813b7f6e))
-* **promotion:** stop the promotion path importing the training stack ([b2b517b](https://github.com/MichAdebayo/sicurre-ml/commit/b2b517b4fbd409340db1253d50b59eb3536e391f))
-* **promotion:** stop the promotion path importing the training stack ([3578267](https://github.com/MichAdebayo/sicurre-ml/commit/3578267eba3042aee94049b4a1fc7b2d67f6152f))
+* **promotion:** stop the promotion path importing the training stack ([#151](https://github.com/MichAdebayo/sicurre-ml/issues/151)) ([3578267](https://github.com/MichAdebayo/sicurre-ml/commit/3578267eba3042aee94049b4a1fc7b2d67f6152f))
 
 ## [0.3.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.2.0...v0.3.0) (2026-09-02)
 
