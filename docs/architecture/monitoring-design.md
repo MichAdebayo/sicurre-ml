@@ -1,176 +1,150 @@
-# Monitoring Design — Model Layer
+# Monitoring design: model layer
 
 ## Scope
 
-This document defines the monitoring strategy for the `sicurre-ml` repository.
+This repository monitors model training, evaluation, and the private inference
+service. Email ingestion, database operations, forwarding, and user-facing
+delivery belong to the companion `sicurre` repository. An inference dashboard
+does not measure the complete email delivery path.
 
-It covers the ML training pipeline and the ONNX inference service only.
-Application-level concerns (message ingestion, remediation workflows, user
-notifications, watch renewals) belong to the `sicurre` application repo and are
-explicitly out of scope here.
+Measured results and their limitations belong in
+[performance and quality](performance.md). Operational thresholds are not
+customer SLAs or proof that performance objectives have been met.
 
----
+## Current infrastructure
 
-## Why monitoring is a delivery bloc
+The production Compose configuration runs the app and an ML-owned Alloy
+collector. Redis is not part of this architecture.
 
-Monitoring is not a post-launch concern.
-It provides certification-visible evidence of:
+| Component | Role |
+|-----------|------|
+| `app` | Authenticated inference, readiness, structured logs, metrics, traces |
+| `alloy` | Docker log collection, Prometheus scraping/remote write, OTLP processing/export |
+| Grafana Cloud | Shared Prometheus, Loki, and Tempo backends; ML-scoped dashboard and alerts |
 
-- model quality awareness during training
-- operational control over the inference service
-- early detection of degradation before user impact
-- traceable incident response linked to observable data
+[docker-compose.prod.yml](../../docker-compose.prod.yml) pins Alloy to
+`v1.16.1` and an immutable image digest.
+[config.alloy](../../deploy/alloy/config.alloy) scrapes the app and Alloy every
+60 seconds. Its secrets come from `deploy/env.alloy`.
 
----
+The ML collector discovers only the `sicurre-ml` Compose project. Shared
+datasources must remain additive: ML provisioning must not replace the
+companion repository's dashboards or log views.
 
-## What this repo monitors
+Use `stack="sicurre-ml"` to scope metrics and logs. The application has
+`service_name="sicurre-ml-inference"`; collector self-observability uses
+`service_name="sicurre-ml-alloy"`. Trace resources identify the inference
+service through `service.name`.
 
-### 1. Model availability
+## Signals and interpretation
 
-- Is the ONNX Runtime session loaded and responsive?
-- Which model SHA is currently active? (logged at startup from the SHA cache file)
-- Exposed by `/v1/ready`: returns 200 when the model is loaded, 503 while it is
-  still downloading.
+| Signal | What it establishes | What it does not establish |
+|--------|---------------------|----------------------------|
+| Health, readiness, scrape `up` | Process/model state and scrape reachability | Customer email delivery success |
+| Request count and rate | Observed inference traffic | Capacity or number of unique emails |
+| Request latency by requested mode | HTTP processing time with LLM enabled or disabled | Email end-to-end time or isolated LLM latency |
+| Per-stage latency | Time spent in ONNX, LLM, rules, or blocklist work | A cause for slowness without further diagnosis |
+| Server errors and degraded outcomes | Explicit failures and fallback outcomes | Accuracy of successful classifications |
+| Provider events and selection | Attempts, failures, fallback, selected provider | A confident or correct LLM answer |
+| Label/verdict distribution | Composition of predictions | Ground-truth class distribution or model accuracy |
+| Memory and Alloy delivery counters | Resource use and telemetry pipeline state | A complete host or billing audit |
 
-### 2. Per-stage inference latency
+A returned `uncertain` LLM label is different from provider unavailability.
+A spam-heavy distribution can reflect traffic composition, missing subscription
+context, or model bias. Inspect reviewed examples before drawing a conclusion.
 
-Each of the four pipeline stages is timed independently:
+ONNX class probabilities and the composite risk score are not interchangeable.
+There is no general requirement that a healthy confidence distribution be
+bimodal, and the current implementation should not be described as providing
+a dedicated confidence histogram unless that panel and its data are verified.
 
-| Stage      | Why it matters |
-|------------|----------------|
-| `rules`    | Should be sub-millisecond; a spike indicates a regex change |
-| `blocklist`| Should be sub-millisecond; a spike indicates a slow TLD lookup |
-| `onnx`     | Runs in its own thread pool; a spike indicates memory pressure or session reload |
-| `llm`      | Chain is Mistral then Groq, sequential inside one 7.5 s deadline (`LLM_TOTAL_TIMEOUT_SECONDS`), 2.5 s per provider. Cerebras is implemented but not in the chain |
+The active LLM chain is Mistral then Groq. Its intended budget and the difference
+between source defaults and deployed overrides are documented in
+[performance](performance.md). Optional VirusTotal enrichment makes network
+calls and should be analyzed separately from local blocklist lookups.
 
-### 3. Verdict distribution
+## Structured inference log
 
-The fraction of requests classified as `phishing` vs `safe` is logged per request
-and tracked over time. A sudden shift (e.g., sustained >80% phishing) is an
-early signal that either the traffic population or the model behaviour has changed.
+`emit_classify_request_log` in
+[telemetry.py](../../src/serving/telemetry.py) emits these fields as applicable:
 
-### 4. ONNX confidence distribution
+| Field | Meaning |
+|-------|---------|
+| `event` | `classify_request` |
+| `status_code` | HTTP result |
+| `latency_ms` | Scalar request-processing duration |
+| `model_version` | Current caller supplies the loaded model SHA, despite this historical field name |
+| `verdict` | Binary security verdict |
+| `label_verdict` | Three-class classification |
+| `label_distribution` | Bounded per-class distribution |
+| `stage_latencies_ms` | Timing object keyed by pipeline stage |
+| `llm_provider` | Selected provider or null |
+| `error_type` | Bounded error category where applicable |
 
-Healthy model output is bimodal: most composite scores cluster near 0 or near 1.
-If the distribution flattens toward 0.5 (the threshold), the model is becoming
-uncertain. This is logged as the raw `composite_score` per request and visualised
-as a histogram in Grafana.
+This is not the same schema as the identity manifest: there,
+`model.version` is the readable version label and `model.revision` is the SHA.
+See [deployment identity](deployment-identity.md).
 
-### 5. LLM tier usage and fallback rate
+The request log does not include the previously proposed `text_hash`,
+`cache_hit`, raw email, prompt, or credential fields. Do not introduce PII or
+unbounded request identifiers as metric labels.
 
-- Which LLM provider was used (`mistral`, `groq`, or `none`)?
-- How often does Tier 1 (Mistral) fail and fall back to Tier 2 (Groq)?
-- How often does the whole LLM stage return `None` (both providers failed)?
+Alloy drops repetitive successful probe access logs, not health metrics.
+Failures and important lifecycle events remain diagnostically relevant.
+Configured trace sampling is selective, so the absence of an individual
+successful request in Traces Drilldown does not alone prove exporter failure.
 
-A spike in fallback rate signals API key expiry or a provider outage.
+## Dashboard interpretation
 
-### 6. Prediction cache hit rate
+Keep the dashboard metrics-only. Logs and traces remain in their Drilldown
+views. Keep the model version tag visible, with a short SHA for readability and
+the full revision accessible through the manifest.
 
-Once the Redis prediction cache is active, the fraction of requests served from
-cache vs. computed fresh is logged. A low hit rate with repetitive inputs may
-indicate a cache configuration issue. A high hit rate reduces LLM costs
-directly.
+For sparse certification traffic:
 
-### 7. Rate limit hit rate
+- Show request counts alongside percentile and error-rate charts.
+- Distinguish no requests, a genuine zero, and missing telemetry.
+- Label percentiles as histogram estimates over the selected time window.
+- Keep request latency separate from per-stage/provider latency.
+- Distinguish LLM provider events from final provider selection and uncertainty.
+- Do not present a verdict mix as a quality or accuracy score.
 
-How often is a caller rejected by the rate limiter (HTTP 429)?
-A sustained spike may indicate a misconfigured client, a stuck retry loop, or
-an attempted abuse.
+These are presentation requirements for the dashboard follow-up, not a claim
+that every current panel already implements them. No dashboard layout was
+changed during this documentation update.
 
-### 8. Training quality signals (mlops branch)
+## Alert definitions and known limitation
 
-Tracked via MLflow during training runs:
+The repository-owned alert definitions are
+[sicurre-ml-alerts.json](../../deploy/grafana/alerts/sicurre-ml-alerts.json).
+They include readiness/availability, latency, server errors, authentication
+and rate-limit spikes, memory pressure, scrape health, dropped logs, and ML
+active-series budget warnings.
 
-- `eval/f1` per class and weighted
-- `eval/precision`, `eval/recall`
-- `eval/loss`
-- Confusion matrix (as a logged artifact)
-- Promotion threshold passage (`eval/f1 >= promotion_tolerance`)
+The current LLM-mode request p95 alert cannot be validated as intended because
+the histogram's largest finite bucket is below its threshold. See the exact
+values and explanation in [performance](performance.md). A configured rule is
+not evidence of successful firing, notification delivery, or on-call coverage.
 
-These are logged per training run, not per inference request.
+Evaluate window length and sample count when interpreting alerts. The
+server-error expression clamps a small denominator, so at very low traffic it
+is not simply an exact failed-requests percentage. The budget series query is
+an instant count of ML-labeled series, not an independent Grafana billing
+statement.
 
----
+Samples per minute measure telemetry ingestion, not inference throughput and
+not active-series count. A high sample-rate card must not reuse active-series
+budget thresholds. Logs, traces, discarded telemetry, and testing usage have
+separate budgets; visibility of one does not verify compliance with all of
+them.
 
-## What this repo does NOT monitor
+## Training and evaluation
 
-The following concerns belong to the `sicurre` application repo:
+MLflow retains training metrics, confusion matrices, candidate/incumbent
+evaluations, and promotion evidence. Training-validation metrics are distinct
+from the evaluation-only golden set and from production telemetry.
 
-- message ingestion pipeline health
-- watch renewal and listener availability
-- remediation workflow outcomes
-- user-facing notification delivery
-- database metrics
-- user session data
-
----
-
-## Infrastructure
-
-Sicurre-ML runs its own isolated monitoring stack — not shared with Vinse.
-Both applications run on the same Hetzner server (CX33) but in separate
-Docker Compose projects under separate Linux users.
-
-| Component       | Image                  | Role |
-|-----------------|------------------------|------|
-| `app`           | sicurre-ml (GHCR)      | FastAPI inference API |
-| `redis`         | redis:7-alpine         | Rate limiting + prediction cache |
-| `alloy`         | grafana/alloy:latest   | Log shipping agent |
-
-Grafana Alloy tails the `app` container's stdout and ships logs to Grafana Cloud
-Loki. No metrics agent (Prometheus) is deployed at this stage.
-
----
-
-## Log schema
-
-Target state for model-runtime telemetry in this service: each completed
-`/v1/classify` request should emit one structured JSON log line to stdout.
-Planned fields:
-
-| Field              | Type    | Description |
-|--------------------|---------|-------------|
-| `request_id`       | string  | UUID, unique per request |
-| `text_hash`        | string  | SHA-256 of input text (no plaintext logged) |
-| `verdict`          | string  | `phishing` or `safe` |
-| `composite_score`  | float   | Final weighted score (0–1) |
-| `stage_scores`     | object  | `{rules, blocklist, onnx, llm}` individual scores |
-| `latency_ms`       | object  | `{rules, blocklist, onnx, llm, total}` in milliseconds |
-| `llm_provider`     | string  | `groq`, `cerebras`, or `null` |
-| `cache_hit`        | bool    | Whether the result was served from Redis |
-| `model_sha`        | string  | SHA of the loaded ONNX model file |
-| `timestamp`        | string  | ISO 8601 UTC |
-
----
-
-## Alerting targets
-
-Authoritative list, matching what is deployed in
-`deploy/grafana/alerts/sicurre-ml-alerts.json`. Objectives these map to are in
-[performance](performance.md).
-
-| Condition | Threshold |
-|-----------|-----------|
-| Service unavailable / model not ready | — |
-| Local inference p95 (`mode=local`) | > 1000 ms |
-| LLM inference p95 (`mode=llm`) | > 8000 ms |
-| Server error rate | > 2% |
-| Authentication rejection spike | > 5 |
-| Rate-limit spike | > 10 |
-| Process memory | > 6 GiB |
-| Telemetry scrape unavailable / Alloy dropping entries | — |
-| Active series above budget | 2100 / 2550 |
-
-These are the thresholds the alerts actually use. Measured latency figures are
-in [performance](performance.md).
-
----
-
-## Delivery outputs
-
-Expected outputs for the monitoring delivery bloc:
-
-- this design document (public, certification-visible)
-- `deploy/alloy/config.alloy` — Alloy configuration wired to Grafana Cloud
-- structured JSON logging in `src/serving/app.py` (`emit_classify_request_log`) — implemented
-- Grafana dashboard capturing verdict distribution, latency, and fallback rate
-- one documented incident example with root cause, fix, and linked evidence
+The promotion gate compares weighted F1, phishing recall, and legitimate false
+positives against the incumbent on the same immutable set. There is no single
+`eval/f1 >= promotion_tolerance` rule that substitutes for this comparison.
+See [promotion policy](../model/promotion-policy.md).
