@@ -48,7 +48,11 @@ from src.serving.telemetry import (  # noqa: E402
     runtime_telemetry,
 )
 
-_production = os.getenv("DEPLOYMENT_ENV", "development").lower() == "production"
+_local_docs = os.getenv("DEPLOYMENT_ENV", "development").strip().lower() in {
+    "dev",
+    "development",
+    "local",
+}
 
 
 @asynccontextmanager
@@ -83,9 +87,9 @@ app = FastAPI(
     description="Multi-stage phishing detection — rules + blocklist + ONNX + LLM",
     version="0.1.0",
     lifespan=_lifespan,
-    docs_url=None if _production else "/docs",
-    redoc_url=None if _production else "/redoc",
-    openapi_url=None if _production else "/openapi.json",
+    docs_url="/docs" if _local_docs else None,
+    redoc_url="/redoc" if _local_docs else None,
+    openapi_url="/openapi.json" if _local_docs else None,
 )
 app.add_middleware(
     TrustedHostMiddleware,
