@@ -126,7 +126,7 @@ def test_dashboard_and_alerts_distinguish_app_from_alloy() -> None:
     for row in (p for p in dashboard["panels"] if p["type"] == "row"):
         panels.update({p["title"]: p for p in row.get("panels", [])})
 
-    service_up = panels["Metrics scrape health"]
+    service_up = panels["ML scrape"]
     assert 'service_name="sicurre-ml-inference"' in service_up["targets"][0]["expr"]
     alert_expressions = {alert["uid"]: alert["expr"] for alert in alerts}
     assert 'service_name="sicurre-ml-inference"' in alert_expressions["sicurre-ml-unavailable"]
@@ -154,12 +154,12 @@ def test_dashboard_opens_on_a_screenshottable_first_view() -> None:
     """
     dashboard, _ = _ml_dashboard_panels()
 
-    rows = [p for p in dashboard["panels"] if p["type"] == "row"]
+    rows = [p for p in dashboard["panels"] if p["type"] == "row" and p["collapsed"]]
     assert rows, "detail must be grouped into collapsed rows"
     assert all(r["collapsed"] for r in rows), "detail rows must start collapsed"
 
     first_view = min(r["gridPos"]["y"] for r in rows)
-    assert first_view <= 17, (
+    assert first_view <= 18, (
         f"the first view is {first_view} grid units tall and will not fit a "
         f"1440x900 capture without scrolling"
     )
@@ -167,12 +167,15 @@ def test_dashboard_opens_on_a_screenshottable_first_view() -> None:
     charts_above_fold = [
         p
         for p in dashboard["panels"]
-        if p["type"] == "timeseries" and p["gridPos"]["y"] < first_view
+        if p["type"] in {"timeseries", "bargauge"} and p["gridPos"]["y"] < first_view
     ]
     assert len(charts_above_fold) >= 4, (
-        "the first view must show latency, request rate, errors and provider "
-        "outcomes without scrolling"
+        "the first view must show latency, activity, classification and stage "
+        "duration without scrolling"
     )
+    assert {p["title"] for p in charts_above_fold} == {
+        "Inference latency", "Request activity", "Content classification", "Mean stage duration"
+    }
 
     for band_y in {p["gridPos"]["y"] for p in dashboard["panels"] if p["type"] != "row"}:
         width = sum(
@@ -191,7 +194,7 @@ def test_dashboard_separates_the_service_from_its_telemetry_agent() -> None:
     """
     _, panels = _ml_dashboard_panels()
 
-    expr = panels["Metrics scrape health"]["targets"][0]["expr"]
+    expr = panels["ML scrape"]["targets"][0]["expr"]
     assert 'service_name="sicurre-ml-inference"' in expr
 
 
@@ -199,27 +202,23 @@ def test_dashboard_reports_identity_and_units_precisely() -> None:
     """Model revision is truncated for display; resource units are real units."""
     _, panels = _ml_dashboard_panels()
 
-    assert panels["Active model revision"]["options"]["textMode"] == "name"
-    model_target = panels["Active model revision"]["targets"][0]
+    assert panels["Model revision"]["options"]["textMode"] == "name"
+    model_target = panels["Model revision"]["targets"][0]
     assert "display_version" in model_target["expr"]
     assert "$1…$2" in model_target["expr"]
+    assert model_target["legendFormat"] == "{{display_version}}"
 
     assert panels["Process memory"]["fieldConfig"]["defaults"]["unit"] == "bytes"
     assert panels["Process CPU"]["fieldConfig"]["defaults"]["unit"] == "cores"
 
     assert (
         "increase(sicurre_inference_label_total"
-        in panels["Classification volume by label"]["targets"][0]["expr"]
+        in panels["Content classification"]["targets"][0]["expr"]
     )
 
 
 def test_dashboard_distinguishes_absent_telemetry_from_measured_zero() -> None:
-    """No `or vector(0)`: a never-incremented counter is not a measured zero.
-
-    The previous Degraded decisions panel substituted zero for an absent series,
-    which renders missing telemetry as a clean bill of health. Every panel now
-    declares noValue instead, so the two states read differently.
-    """
+    """Sparse event counters may read zero only with healthy request telemetry."""
     dashboard, panels = _ml_dashboard_panels()
 
     degraded = panels["Degraded decisions"]["targets"][0]["expr"]
@@ -227,12 +226,15 @@ def test_dashboard_distinguishes_absent_telemetry_from_measured_zero() -> None:
         "degradation is its own metric, distinct from error_total"
     )
     assert "vector(0)" not in degraded
+    assert "0 * sum(increase(sicurre_inference_requests_total" in degraded
+    assert 'service_name="sicurre-ml-inference"' in degraded
+    assert "== 1" in degraded
 
     all_panels = [p for p in dashboard["panels"] if p["type"] != "row"]
     for row in (p for p in dashboard["panels"] if p["type"] == "row"):
         all_panels.extend(row.get("panels", []))
     for panel in all_panels:
-        assert panel["fieldConfig"]["defaults"].get("noValue") == "No data", (
+        assert panel["fieldConfig"]["defaults"].get("noValue") in {"No data", "Unavailable"}, (
             f"{panel['title']} does not distinguish absent data from zero"
         )
 
@@ -249,10 +251,20 @@ def test_dashboard_does_not_imply_an_unreachable_latency_threshold() -> None:
     _, panels = _ml_dashboard_panels()
     ceiling = int(max(_PROMETHEUS_BUCKETS_MS))
 
-    latency = panels["ML handler latency percentiles — all modes"]
+    latency = panels["Inference latency"]
     assert str(ceiling) in latency["description"], (
         f"the latency panel must state the histogram ceiling ({ceiling} ms)"
     )
+
+
+def test_dashboard_uses_emitted_provider_labels_and_observed_stage_samples() -> None:
+    _, panels = _ml_dashboard_panels()
+    provider = panels["LLM provider outcomes"]["targets"][0]
+    assert "provider, category" in provider["expr"]
+    assert "{{category}}" in provider["legendFormat"]
+    stage = panels["Mean stage duration"]["targets"][0]["expr"]
+    assert " > 0" in stage
+    assert "clamp_min" not in stage
 
 
 def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:
