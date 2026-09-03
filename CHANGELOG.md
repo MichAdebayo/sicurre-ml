@@ -1,5 +1,101 @@
 # Changelog
 
+## [0.4.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.3.0...v0.4.0) (2026-09-03)
+
+
+### Features
+
+* **grafana:** rebuild the ML dashboard around a readable first view ([#154](https://github.com/MichAdebayo/sicurre-ml/issues/154)) ([14ff6ff](https://github.com/MichAdebayo/sicurre-ml/commit/14ff6ff3c935fbf0c756e8c6c804573b642c4d41))
+* **manifest:** document what each runtime identity field means ([#155](https://github.com/MichAdebayo/sicurre-ml/issues/155)) ([e64cdab](https://github.com/MichAdebayo/sicurre-ml/commit/e64cdab45230fe7d1482d7771dd1221cc1efe9ab))
+
+
+### Bug Fixes
+
+* **promotion:** stop the promotion path importing the training stack ([#151](https://github.com/MichAdebayo/sicurre-ml/issues/151)) ([3578267](https://github.com/MichAdebayo/sicurre-ml/commit/3578267eba3042aee94049b4a1fc7b2d67f6152f))
+
+## [0.3.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.2.0...v0.3.0) (2026-09-02)
+
+
+### Features
+
+* **evaluation:** score candidates against the newest published golden set ([d9df6f8](https://github.com/MichAdebayo/sicurre-ml/commit/d9df6f833d584a920b3d1461d77c33446e8fa550))
+* **gate:** derive phishing-recall margin from evaluation-set precision ([19850c9](https://github.com/MichAdebayo/sicurre-ml/commit/19850c94d38f7eddf977ef2965f3d077c87dfb73))
+* **gate:** derive the phishing-recall margin from evaluation-set precision ([e93f6d6](https://github.com/MichAdebayo/sicurre-ml/commit/e93f6d610b942458cffcfd9a153f6a01abd66175))
+* **gate:** derive the phishing-recall margin from evaluation-set precision ([5eb92e9](https://github.com/MichAdebayo/sicurre-ml/commit/5eb92e9403c0ab5abff1dc74ca98e37d27f240a9))
+* **observability:** deploy ML inference command center ([05bf3a1](https://github.com/MichAdebayo/sicurre-ml/commit/05bf3a11157957191f9007d730cfc22b79d5b3f6))
+* **observability:** promote ML inference command center ([2dcdd07](https://github.com/MichAdebayo/sicurre-ml/commit/2dcdd07bd93f2921f38dc43ceea7294aa969fc51))
+* **observability:** rebuild ML inference command center ([fc921bd](https://github.com/MichAdebayo/sicurre-ml/commit/fc921bdd5393dcede8af4086222c728c91c892d3))
+* **observability:** rebuild ML inference dashboard ([b2acc0d](https://github.com/MichAdebayo/sicurre-ml/commit/b2acc0d8ab997fc62e43c361da23abcd3dbf8be8))
+
+
+### Bug Fixes
+
+* align production inference API contract ([9dea68e](https://github.com/MichAdebayo/sicurre-ml/commit/9dea68e64076758b153cf8f2d3e063477f7a07cf))
+* **api:** align inference payload contract ([e17013e](https://github.com/MichAdebayo/sicurre-ml/commit/e17013e12cff533fe087612c23dee5299d8cf021))
+* apply container security updates ([fec03de](https://github.com/MichAdebayo/sicurre-ml/commit/fec03def256c1fad214be51f66f953d877f5cb3e))
+* **cd:** normalise the Grafana token and preflight it ([f9ce15a](https://github.com/MichAdebayo/sicurre-ml/commit/f9ce15a69c01f42c490f8a50a59f0b7083169570))
+* **cd:** normalise the Grafana token and preflight it ([7655691](https://github.com/MichAdebayo/sicurre-ml/commit/765569197f1a0a51f6088ee377de4650c6cbe5d0))
+* **cd:** preserve Grafana response shape in the retry wrapper ([1bab558](https://github.com/MichAdebayo/sicurre-ml/commit/1bab5585786cb157ccb02ca01b6e7aacdb699c00))
+* **cd:** preserve Grafana response shape in the retry wrapper ([f7dd38f](https://github.com/MichAdebayo/sicurre-ml/commit/f7dd38f3a6358940276cc17e9377c55baf28715c))
+* **cd:** retry transient Grafana dashboard provisioning ([cfc4236](https://github.com/MichAdebayo/sicurre-ml/commit/cfc4236f6386967896a33c9e3adacd88c52fa74a))
+* **cd:** retry transient Grafana dashboard provisioning ([535b3b1](https://github.com/MichAdebayo/sicurre-ml/commit/535b3b14562d931133a75bcb0bc299409838dd8f))
+* **ci:** promote bounded Docker cache handling ([0142403](https://github.com/MichAdebayo/sicurre-ml/commit/0142403680693d55426825dc178e6291d6f12bc5))
+* **ci:** release bounded Docker cache handling ([1ad899a](https://github.com/MichAdebayo/sicurre-ml/commit/1ad899ad1ef2c23b4910712e6f24138d062b9e13))
+* **ci:** stop routing the Hugging Face repository through job outputs ([6c20e89](https://github.com/MichAdebayo/sicurre-ml/commit/6c20e89a510dfee86f2e0434fea5a64a3f7716ca))
+* **ci:** tolerate exhausted build cache ([ca9a736](https://github.com/MichAdebayo/sicurre-ml/commit/ca9a736b90eac1489a5ec3160a6ff828bee6b683))
+* **ci:** tolerate exhausted build cache ([41b5ba6](https://github.com/MichAdebayo/sicurre-ml/commit/41b5ba67d695a8b736019698edaa837632ebb6ce))
+* **evaluation:** score the golden set the way production serves ([f501b1f](https://github.com/MichAdebayo/sicurre-ml/commit/f501b1f7df1695d257b970dd868a1844c18c169b))
+* **evaluation:** score the golden set the way production serves ([5c66888](https://github.com/MichAdebayo/sicurre-ml/commit/5c66888b7d5ac642bdb264dca98abd359117be55))
+* **evaluation:** score the golden set the way production serves ([402479b](https://github.com/MichAdebayo/sicurre-ml/commit/402479b9ed48b41b4bf3c10bdf25d5d3531b8a49))
+* grant training workflow promotion read access ([e387039](https://github.com/MichAdebayo/sicurre-ml/commit/e387039b0a6e15383a982b69c88c650dbf9e4613))
+* grant training workflow promotion read access ([3806d63](https://github.com/MichAdebayo/sicurre-ml/commit/3806d63667a18c00616661228c30a09da72ac847))
+* **inference:** calibrate expected subscription mail ([f31d200](https://github.com/MichAdebayo/sicurre-ml/commit/f31d200a3f372eff8a07bb29118eaa2c7d2d7b24))
+* **inference:** calibrate expected subscription mail ([13a958a](https://github.com/MichAdebayo/sicurre-ml/commit/13a958a85e069f094826f39d8da6eafd6a7d214c))
+* **inference:** classify trusted forwards contextually ([7393430](https://github.com/MichAdebayo/sicurre-ml/commit/7393430d9aa097bcfc1c6bc1f5c7ec7a18c2c0c8))
+* **inference:** classify trusted forwards contextually ([3b08dc5](https://github.com/MichAdebayo/sicurre-ml/commit/3b08dc56e1d828dd2a2b0c9ae0312e79b3171e77))
+* **inference:** drop the dead Cerebras tier from the provider chain ([b225391](https://github.com/MichAdebayo/sicurre-ml/commit/b225391d3afab167690c0efd0fa951a7c9f79441))
+* **inference:** feed the classifier the shape it was trained on ([f1a86ac](https://github.com/MichAdebayo/sicurre-ml/commit/f1a86acd0246951d1d9294ff64f073be8157fe37))
+* **inference:** feed the classifier the shape it was trained on ([fdb77cf](https://github.com/MichAdebayo/sicurre-ml/commit/fdb77cf0ec6b6b4104ae164242dbe85ca2f07b9e))
+* **inference:** feed the classifier the shape it was trained on ([8ebc3dc](https://github.com/MichAdebayo/sicurre-ml/commit/8ebc3dc060cb1abeaf8dfa9f4862a576a7946e6e))
+* **inference:** promote subscription spam calibration ([5eea735](https://github.com/MichAdebayo/sicurre-ml/commit/5eea735821f3d7179d1da62d3d8dbab8186fe488))
+* **inference:** release subscription spam calibration ([7afbe65](https://github.com/MichAdebayo/sicurre-ml/commit/7afbe654bc5e0d1110dc56fd3bad8789d679231f))
+* **observability:** clarify ML telemetry budget signals ([26d239f](https://github.com/MichAdebayo/sicurre-ml/commit/26d239f038304b461b450a5b69404fd05e9a4023))
+* **observability:** clarify ML telemetry budget signals ([78342ae](https://github.com/MichAdebayo/sicurre-ml/commit/78342aeb23e1286bf608057b44ab52aa8d3c877c))
+* **observability:** clarify ML telemetry budget signals ([d3e3b6f](https://github.com/MichAdebayo/sicurre-ml/commit/d3e3b6f5fe0c6a8b1caf046aee5448f2613a09a3))
+* **observability:** clarify telemetry budget panels ([4a87a3c](https://github.com/MichAdebayo/sicurre-ml/commit/4a87a3c38aec3d2ee1308e5af6b5d537757e1df4))
+* pin resolvable setup-uv release ([68df2a3](https://github.com/MichAdebayo/sicurre-ml/commit/68df2a303801229044fba3c5c0c423eb7ef8109b))
+* promote forwarded-mail context handling ([3a0cdd0](https://github.com/MichAdebayo/sicurre-ml/commit/3a0cdd0d8c3f3ca0e1b64b3c210c6d8ee6254218))
+* release forwarded-mail context handling ([327c947](https://github.com/MichAdebayo/sicurre-ml/commit/327c9475b47d7e14b6b08a81932432be1a360d73))
+* **test:** satisfy mypy on HTTPError headers ([c7ee8b2](https://github.com/MichAdebayo/sicurre-ml/commit/c7ee8b25a461de5e145d4138bc94058406156ae8))
+* **test:** satisfy mypy on HTTPError headers ([a94268c](https://github.com/MichAdebayo/sicurre-ml/commit/a94268c191d0de36c986171d9210e807e1ad98e6))
+* **training:** stop phishing_boost undoing the class balancing ([57cc56c](https://github.com/MichAdebayo/sicurre-ml/commit/57cc56c4989e8ab7a425dd4ae68953e8a41224c7))
+* **train:** retry the candidate download instead of discarding a finished model ([9e44f64](https://github.com/MichAdebayo/sicurre-ml/commit/9e44f64fd75a245e7e77a264641926fbb345c143))
+* **train:** stop GitHub emptying hf_repository between jobs ([74f940b](https://github.com/MichAdebayo/sicurre-ml/commit/74f940b68435e441271bb78fd4cdf2356dc7a3ca))
+
+
+### Performance Improvements
+
+* **inference:** bound the LLM explanation to cut decode time ([f52635f](https://github.com/MichAdebayo/sicurre-ml/commit/f52635f47a39653758cd2b97d3b2d731bf7d404f))
+* **inference:** shorter explanation + drop the dead Cerebras tier ([4f7eb6b](https://github.com/MichAdebayo/sicurre-ml/commit/4f7eb6b995397d38bcf795c712f6788506e32363))
+* **inference:** split semantic pools and observe stages ([62bdd56](https://github.com/MichAdebayo/sicurre-ml/commit/62bdd56880725309530fc364f8c547cdecf43f69))
+* **inference:** split semantic pools and observe stages ([8f0abc7](https://github.com/MichAdebayo/sicurre-ml/commit/8f0abc746adfab3855600b70a38420b2c57f6156))
+
+
+### Reverts
+
+* **training:** back to four epochs - three measured significantly worse ([d7d1100](https://github.com/MichAdebayo/sicurre-ml/commit/d7d1100ce1cbe66f7754790a26d552f5faddd9d1))
+
+
+### Documentation
+
+* define service levels and rewrite the READMEs around them ([def6f92](https://github.com/MichAdebayo/sicurre-ml/commit/def6f92e01415c9e36a8e2b71816060df6edecec))
+* measure and state the full path, and explain what 8 seconds is ([8326b37](https://github.com/MichAdebayo/sicurre-ml/commit/8326b37b36714da7e8504159bef4606c219f3073))
+* reconcile service levels against the deployed stack and the actual code ([640204d](https://github.com/MichAdebayo/sicurre-ml/commit/640204da0c3beb68718b9be0b643e25098d8577b))
+* record that classification is synchronous on the mail delivery path ([7d61653](https://github.com/MichAdebayo/sicurre-ml/commit/7d616534045985202fa9c911f356a5c76bc50cfe))
+* remove claims the code does not support ([62ca035](https://github.com/MichAdebayo/sicurre-ml/commit/62ca0352d37e43e3f4c8282500e288accc626403))
+* replace the service-level formalism with measured numbers ([b58d7d0](https://github.com/MichAdebayo/sicurre-ml/commit/b58d7d026b989eb33069b26f2cfbb532b2eba735))
+* version the design documentation and make the ignore policy explicit ([1cc59c9](https://github.com/MichAdebayo/sicurre-ml/commit/1cc59c9aa52642cef953f57f38e9b331abb3e52a))
+
 ## [0.2.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.1.0...v0.2.0) (2026-07-29)
 
 
