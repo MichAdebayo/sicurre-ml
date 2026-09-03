@@ -52,6 +52,8 @@ def test_health_panels_use_fresh_observations_and_distinct_unknown_states() -> N
         assert "timestamp(" in expr and "time() - 180" in expr
         assert "vector(3)" in expr
         mappings = panel["fieldConfig"]["defaults"]["mappings"][0]["options"]
+        assert mappings["0"]["text"] == "Down"
+        assert mappings["1"]["text"] == "Up"
         assert mappings["2"]["text"] == "Stale"
         assert mappings["3"]["text"] == "Unknown"
         assert mappings["3"]["color"] == "text"

@@ -729,11 +729,11 @@
                   "type": "value",
                   "options": {
                     "0": {
-                      "text": "Failed",
+                      "text": "Down",
                       "color": "red"
                     },
                     "1": {
-                      "text": "Reachable",
+                      "text": "Up",
                       "color": "semi-dark-green"
                     },
                     "2": {
@@ -825,11 +825,11 @@
                   "type": "value",
                   "options": {
                     "0": {
-                      "text": "Failed",
+                      "text": "Down",
                       "color": "red"
                     },
                     "1": {
-                      "text": "Scraping",
+                      "text": "Up",
                       "color": "semi-dark-green"
                     },
                     "2": {
@@ -921,11 +921,11 @@
                   "type": "value",
                   "options": {
                     "0": {
-                      "text": "Not ready",
+                      "text": "Down",
                       "color": "red"
                     },
                     "1": {
-                      "text": "Ready",
+                      "text": "Up",
                       "color": "semi-dark-green"
                     },
                     "2": {
@@ -1017,11 +1017,11 @@
                   "type": "value",
                   "options": {
                     "0": {
-                      "text": "Failed",
+                      "text": "Down",
                       "color": "red"
                     },
                     "1": {
-                      "text": "Reporting",
+                      "text": "Up",
                       "color": "semi-dark-green"
                     },
                     "2": {
