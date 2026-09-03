@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sicurre.com/schemas/ml-deployment-manifest-v1.json",
   "title": "Sicurre ML deployment manifest",
+  "description": "Runtime identity snapshot. Model version maps to the resolved Hugging Face commit; code, training dataset, and container identities remain separate. Unknown fields represent missing evidence, not a verified release.",
   "type": "object",
   "required": ["schema_version", "service", "model", "dataset", "deployment"],
   "properties": {
@@ -11,7 +12,7 @@
       "required": ["name", "version", "api_contract"],
       "properties": {
         "name": {"const": "sicurre-ml"},
-        "version": {"type": "string"},
+        "version": {"type": "string", "description": "Service/code release version, independent of model version."},
         "api_contract": {"const": "v1"}
       }
     },
@@ -19,21 +20,22 @@
       "type": "object",
       "required": ["version", "revision"],
       "properties": {
-        "version": {"type": "string"},
-        "revision": {"type": "string"}
+        "version": {"type": "string", "description": "Readable model version label from MODEL_VERSION; pair with revision, not the MLflow registry number."},
+        "requested_revision": {"type": "string", "description": "Configured Hugging Face reference. Production should pin the immutable commit rather than a mutable tag."},
+        "revision": {"type": "string", "description": "Resolved Hugging Face commit SHA reported by the loaded model runtime, or unknown before identity is available."}
       }
     },
     "dataset": {
       "type": "object",
       "required": ["version"],
-      "properties": {"version": {"type": "string"}}
+      "properties": {"version": {"type": "string", "description": "Frozen training dataset version, or unknown if lineage is missing. Never substitute a model SHA or evaluation-set version."}}
     },
     "deployment": {
       "type": "object",
       "required": ["revision", "container_image_digest"],
       "properties": {
-        "revision": {"type": "string"},
-        "container_image_digest": {"type": "string"}
+        "revision": {"type": "string", "description": "Deployment/build revision, normally the source Git commit used as the image tag."},
+        "container_image_digest": {"type": "string", "description": "Immutable container image digest (sha256), or unknown if not supplied. This is not the model commit."}
       }
     }
   }

@@ -134,9 +134,12 @@ def test_rate_limit_returns_retry_after(monkeypatch) -> None:
     client = TestClient(serving_app.app)
     payload = {"text": "hello", "use_llm": False}
 
-    assert client.post(
-        "/v1/classify", headers={"Authorization": "Bearer test-key"}, json=payload
-    ).status_code == 200
+    assert (
+        client.post(
+            "/v1/classify", headers={"Authorization": "Bearer test-key"}, json=payload
+        ).status_code
+        == 200
+    )
     limited = client.post(
         "/v1/classify", headers={"Authorization": "Bearer test-key"}, json=payload
     )
@@ -173,9 +176,7 @@ def test_manifest_requires_auth(monkeypatch) -> None:
     client = TestClient(serving_app.app)
 
     assert client.get("/v1/manifest").status_code == 401
-    response = client.get(
-        "/v1/manifest", headers={"Authorization": "Bearer test-key"}
-    )
+    response = client.get("/v1/manifest", headers={"Authorization": "Bearer test-key"})
 
     assert response.status_code == 200
     assert response.json()["service"]["api_contract"] == "v1"
@@ -187,3 +188,69 @@ def test_untrusted_host_is_rejected() -> None:
     response = client.get("/v1/health", headers={"Host": "attacker.invalid"})
 
     assert response.status_code == 400
+
+
+def test_ready_returns_200_when_the_model_is_loaded(monkeypatch) -> None:
+    """Readiness is the endpoint the deploy gate waits on for up to 180 attempts.
+
+    It had no test of its own: the eight tests here covered health, metrics,
+    classify, manifest, rate limiting, sanitised errors and trusted host, while
+    readiness was exercised only by deploy/scripts/validate_deployment.py at
+    deployment time. A contract enforced solely at deploy time fails in the
+    slowest, most expensive place.
+    """
+    monkeypatch.setattr("src.inference.onnx_classifier._load_session_and_tokenizer", lambda: None)
+    monkeypatch.setattr("src.serving.app.get_phishtank_set", lambda: frozenset())
+    client = TestClient(serving_app.app)
+
+    response = client.get("/v1/ready")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}
+
+
+def test_ready_returns_503_until_the_model_loads(monkeypatch) -> None:
+    """A model still downloading must read 503, never 200.
+
+    This is the distinction the deploy gate depends on. If readiness answered
+    200 while the session was absent, the workflow would proceed to pin and
+    validate a container that cannot classify, and the failure would surface as
+    a confusing classify error rather than a clear readiness timeout.
+
+    Retry-After is asserted because the caller polls: without it a client has no
+    guidance on interval, and 503 is a wait rather than a refusal.
+    """
+
+    def _still_loading() -> None:
+        raise RuntimeError("model artefact is still downloading")
+
+    monkeypatch.setattr("src.inference.onnx_classifier._load_session_and_tokenizer", _still_loading)
+    client = TestClient(serving_app.app)
+
+    response = client.get("/v1/ready")
+
+    assert response.status_code == 503
+    assert response.headers.get("Retry-After") == "5"
+    assert "not ready" in response.json()["detail"].lower()
+
+
+def test_ready_does_not_leak_the_underlying_failure(monkeypatch) -> None:
+    """The reason a model failed to load must not reach an unauthenticated caller.
+
+    /v1/ready needs no bearer token, so its body is public. A raised exception
+    can carry a storage path, a bucket name or a revision, and this endpoint is
+    reachable by anyone who can resolve the host.
+    """
+
+    def _leaky() -> None:
+        raise RuntimeError("failed to fetch s3://internal-bucket/models/secret-revision/model.onnx")
+
+    monkeypatch.setattr("src.inference.onnx_classifier._load_session_and_tokenizer", _leaky)
+    client = TestClient(serving_app.app)
+
+    response = client.get("/v1/ready")
+
+    assert response.status_code == 503
+    body = response.text.lower()
+    for leaked in ("s3://", "internal-bucket", "secret-revision", "model.onnx"):
+        assert leaked not in body, f"readiness leaked {leaked!r} to an unauthenticated caller"

@@ -35,14 +35,37 @@ deploy/nginx/README.md
 tmp/
 temp/
 
-# Keep certification evidence and API contract docs versioned.
+# Documentation policy. NOTE: this repo is PUBLIC; the companion sicurre repo
+# is private. That asymmetry is why this list is explicit rather than "docs/".
+#
+# Versioned - what someone who did not build this needs in order to work on it,
+# and the evidence a reviewer reads. Audited: no credential, host, address, or
+# personal data appears in any of them. They disclose the stack (Hetzner CX33,
+# redis, Alloy) but nothing reachable.
+#
+# Kept local:
+#   docs/ops/          runbooks - name storage buckets and recovery procedures
+#   docs/report/       certification evidence
+#   docs/simplon/      Simplon's referential - third-party material, not ours
+#                      to publish - plus the assessment checklist
+#   docs/experiments/  scratch
+#   docs/progress-plan.md  internal planning, carries a personal address
 !docs/
 docs/*
-docs/report/
-docs/report/**
+!docs/README.md
+!docs/adr/
 !docs/api/
 !docs/api/openapi.yaml
+!docs/architecture/
+!docs/model/
 docs/ops/
 docs/ops/**
+docs/report/
+docs/report/**
+docs/simplon/
+docs/simplon/**
+docs/experiments/
+docs/experiments/**
+docs/progress-plan.md
 
 *.png

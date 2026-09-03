@@ -7,12 +7,13 @@ on:
       candidate_mlflow_run_id: {required: true, type: string}
       candidate_mlflow_model_version: {required: true, type: string}
       candidate_hf_revision: {required: true, type: string}
-      hf_repository_name: {required: true, type: string}
       semantic_version: {required: true, type: string}
     secrets:
       DATABRICKS_HOST: {required: true}
       DATABRICKS_TOKEN: {required: true}
       HF_TOKEN: {required: true}
+      HF_USERNAME: {required: true}
+      REPO_NAME: {required: true}
       SICURRE_CALLBACK_BASE_URL: {required: true}
       SICURRE_INTERNAL_API_KEY: {required: true}
       HETZNER_HOST: {required: true}
@@ -32,9 +33,6 @@ on:
         required: true
       candidate_hf_revision:
         description: "Immutable candidate Hugging Face SHA"
-        required: true
-      hf_repository_name:
-        description: "Hugging Face repository name, without the owner"
         required: true
       semantic_version:
         description: "Immutable semantic model version"
@@ -65,9 +63,10 @@ jobs:
       CANDIDATE_MLFLOW_RUN_ID: ${{ inputs.candidate_mlflow_run_id }}
       CANDIDATE_MLFLOW_MODEL_VERSION: ${{ inputs.candidate_mlflow_model_version }}
       CANDIDATE_HF_REVISION: ${{ inputs.candidate_hf_revision }}
-      # Recomposed here rather than received. HF_USERNAME is a secret, so a
-      # job output carrying "owner/name" is scrubbed to empty in transit.
-      HF_REPOSITORY: ${{ secrets.HF_USERNAME }}/${{ inputs.hf_repository_name }}
+      # Both halves come straight from secrets - see evaluate-model.yml.
+      # REPO_NAME is itself a secret, so routing it through a job output
+      # empties it and this resolves to "***/".
+      HF_REPOSITORY: ${{ secrets.HF_USERNAME }}/${{ secrets.REPO_NAME }}
       SEMANTIC_VERSION: ${{ inputs.semantic_version }}
 
     steps:
