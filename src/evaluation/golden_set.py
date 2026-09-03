@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -61,9 +62,7 @@ class GoldenSample:
             extra = sorted(set(value) - expected)
             raise ValueError(f"Invalid golden sample fields; missing={missing}, extra={extra}")
         if value["expected_label"] not in LABEL2ID:
-            raise ValueError(
-                f"Unsupported golden sample label: {value['expected_label']!r}"
-            )
+            raise ValueError(f"Unsupported golden sample label: {value['expected_label']!r}")
         for field_name in expected:
             if not isinstance(value[field_name], str):
                 raise ValueError(f"Golden sample field {field_name!r} must be a string")
@@ -76,15 +75,11 @@ class GoldenSample:
         bounds = {"subject": 500, "sender": 200, "text": 5500}
         for field_name, maximum in bounds.items():
             if len(value[field_name]) > maximum:
-                raise ValueError(
-                    f"Golden sample field {field_name!r} exceeds {maximum} characters"
-                )
+                raise ValueError(f"Golden sample field {field_name!r} exceeds {maximum} characters")
         if value["language"] not in {"fr", "en"}:
             raise ValueError(f"Unsupported golden sample language: {value['language']!r}")
         try:
-            reviewed_at = datetime.fromisoformat(
-                value["reviewed_at"].replace("Z", "+00:00")
-            )
+            reviewed_at = datetime.fromisoformat(value["reviewed_at"].replace("Z", "+00:00"))
         except ValueError as exc:
             raise ValueError("Golden sample reviewed_at must be ISO-8601") from exc
         if reviewed_at.tzinfo is None:
@@ -110,9 +105,7 @@ class GoldenSample:
         """
         from src.inference.input_normalizer import canonicalize_email
 
-        return canonicalize_email(
-            self.text, subject=self.subject, sender=self.sender
-        ).model_text
+        return canonicalize_email(self.text, subject=self.subject, sender=self.sender).model_text
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +156,13 @@ class GoldenSetRelease:
     sha256: str
     schema_version: str
     sample_count: int
+    #: Samples per expected label. Recorded because the promotion gate's
+    #: non-inferiority margin is derived from the phishing count, not from the
+    #: total: 0.099 is the Wilson 95% half-width of a proportion estimated on 42
+    #: samples. A new set with the same total but a different class balance would
+    #: silently invalidate that margin, and nothing would fail. See
+    #: PromotionThresholds in src/evaluation/promotion.py.
+    class_counts: Mapping[str, int]
 
 
 #: Newest last. `latest_golden_set()` picks the final entry.
@@ -173,6 +173,7 @@ GOLDEN_SET_RELEASES: tuple[GoldenSetRelease, ...] = (
         sha256="bc329213cacddab409a63deb9d663e593351b6e740a45cdada4c201e3beea346",
         schema_version="1",
         sample_count=60,
+        class_counts={"phishing": 25, "legitimate": 25, "spam": 10},
     ),
     GoldenSetRelease(
         version="golden-20260816-v3",
@@ -180,6 +181,7 @@ GOLDEN_SET_RELEASES: tuple[GoldenSetRelease, ...] = (
         sha256="6d15f2141cd69d98c9b4ee9b47d505c8aae8505d900fa77705fe0c57b13fb632",
         schema_version="2",
         sample_count=95,
+        class_counts={"phishing": 42, "legitimate": 42, "spam": 11},
     ),
 )
 

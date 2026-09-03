@@ -9,7 +9,38 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any
 
-_PROMETHEUS_BUCKETS_MS = (25.0, 50.0, 100.0, 250.0, 500.0, 1000.0, 2000.0, 5000.0)
+#: Latency histogram boundaries, in milliseconds, cut for a two-second objective.
+#:
+#: The previous set ended at 5000 ms with a single boundary between 1000 and
+#: 2000. That was the wrong shape twice over. A classic histogram's
+#: ``histogram_quantile`` returns the highest finite boundary for any quantile
+#: landing in the overflow bucket, so p95 could never report above 5000 ms - and
+#: the deployed alert asked whether it exceeded 8000 ms, a question the
+#: instrument could not answer. Nine months of that alert were unfalsifiable.
+#:
+#: The resolution was also thinnest exactly where the objective sits. Anything
+#: between one and two seconds fell into one bucket, so the difference between
+#: comfortably inside the budget and about to breach it was invisible.
+#:
+#: These boundaries put five of nine below one second, where healthy requests
+#: land (LLM-enabled classification measured a 823 ms median against production
+#: on 3 September 2026), three across the 1-2 s band the objective cares about,
+#: and one above it. 3000 ms is the ceiling because the chain can no longer
+#: exceed it: the LLM budget is 1.5 s, and the caller aborts at 2.5 s.
+#:
+#: Re-cut these if the objective or the timeout budget changes, and move the
+#: alert threshold with them - the two only mean something together.
+_PROMETHEUS_BUCKETS_MS = (
+    50.0,
+    100.0,
+    250.0,
+    500.0,
+    750.0,
+    1000.0,
+    1500.0,
+    2000.0,
+    3000.0,
+)
 
 
 def _env_text(name: str, default: str = "unknown") -> str:
@@ -19,6 +50,7 @@ def _env_text(name: str, default: str = "unknown") -> str:
 def _sanitize_distribution(distribution: dict[str, float]) -> dict[str, float]:
     labels = ("phishing", "spam", "legitimate")
     return {label: float(distribution.get(label, 0.0)) for label in labels}
+
 
 # Stages that emit a semantic three-class opinion. Rules and blocklists produce
 # phishing evidence only, so they have no label to compare.
@@ -37,7 +69,6 @@ def _provider_outcomes() -> dict[tuple[str, str], int]:
         return provider_event_snapshot()
     except Exception:  # pragma: no cover - metrics must never break the endpoint
         return {}
-
 
 
 @dataclass
@@ -163,17 +194,17 @@ class RuntimeTelemetry:
                 for bucket in _PROMETHEUS_BUCKETS_MS:
                     mode_cumulative += self.mode_latency_buckets.get((mode, bucket), 0)
                     mode_latency_lines.append(
-                        'sicurre_inference_mode_request_latency_ms_bucket'
+                        "sicurre_inference_mode_request_latency_ms_bucket"
                         f'{{mode="{mode}",le="{bucket}"}} {mode_cumulative}'
                     )
                 mode_cumulative += self.mode_latency_buckets.get((mode, float("inf")), 0)
                 mode_latency_lines.extend(
                     [
-                        'sicurre_inference_mode_request_latency_ms_bucket'
+                        "sicurre_inference_mode_request_latency_ms_bucket"
                         f'{{mode="{mode}",le="+Inf"}} {mode_cumulative}',
-                        'sicurre_inference_mode_request_latency_ms_sum'
+                        "sicurre_inference_mode_request_latency_ms_sum"
                         f'{{mode="{mode}"}} {round(self.mode_latency_sum[mode], 6)}',
-                        'sicurre_inference_mode_request_latency_ms_count'
+                        "sicurre_inference_mode_request_latency_ms_count"
                         f'{{mode="{mode}"}} {self.mode_latency_count[mode]}',
                     ]
                 )
@@ -231,79 +262,79 @@ class RuntimeTelemetry:
             )
 
             lines = [
-                '# HELP sicurre_service_up Process liveness reported by the metrics endpoint.',
-                '# TYPE sicurre_service_up gauge',
-                'sicurre_service_up 1',
-                '# HELP sicurre_model_ready Last observed model readiness state.',
-                '# TYPE sicurre_model_ready gauge',
-                f'sicurre_model_ready {self.model_ready}',
-                '# HELP sicurre_auth_failure_total Rejected bearer authentication attempts.',
-                '# TYPE sicurre_auth_failure_total counter',
-                f'sicurre_auth_failure_total {self.auth_failure_total}',
-                '# HELP sicurre_rate_limit_total Requests rejected by application rate limiting.',
-                '# TYPE sicurre_rate_limit_total counter',
-                f'sicurre_rate_limit_total {self.rate_limit_total}',
-                '# HELP sicurre_process_resident_memory_bytes Process resident memory.',
-                '# TYPE sicurre_process_resident_memory_bytes gauge',
-                f'sicurre_process_resident_memory_bytes {_resident_memory_bytes()}',
-                '# HELP sicurre_process_cpu_seconds_total Process CPU time.',
-                '# TYPE sicurre_process_cpu_seconds_total counter',
-                f'sicurre_process_cpu_seconds_total {_process_cpu_seconds()}',
-                '# HELP sicurre_inference_requests_total Total classify requests processed.',
-                '# TYPE sicurre_inference_requests_total counter',
-                f'sicurre_inference_requests_total {self.request_total}',
-                '# HELP sicurre_inference_request_status_total Requests grouped by HTTP status.',
-                '# TYPE sicurre_inference_request_status_total counter',
+                "# HELP sicurre_service_up Process liveness reported by the metrics endpoint.",
+                "# TYPE sicurre_service_up gauge",
+                "sicurre_service_up 1",
+                "# HELP sicurre_model_ready Last observed model readiness state.",
+                "# TYPE sicurre_model_ready gauge",
+                f"sicurre_model_ready {self.model_ready}",
+                "# HELP sicurre_auth_failure_total Rejected bearer authentication attempts.",
+                "# TYPE sicurre_auth_failure_total counter",
+                f"sicurre_auth_failure_total {self.auth_failure_total}",
+                "# HELP sicurre_rate_limit_total Requests rejected by application rate limiting.",
+                "# TYPE sicurre_rate_limit_total counter",
+                f"sicurre_rate_limit_total {self.rate_limit_total}",
+                "# HELP sicurre_process_resident_memory_bytes Process resident memory.",
+                "# TYPE sicurre_process_resident_memory_bytes gauge",
+                f"sicurre_process_resident_memory_bytes {_resident_memory_bytes()}",
+                "# HELP sicurre_process_cpu_seconds_total Process CPU time.",
+                "# TYPE sicurre_process_cpu_seconds_total counter",
+                f"sicurre_process_cpu_seconds_total {_process_cpu_seconds()}",
+                "# HELP sicurre_inference_requests_total Total classify requests processed.",
+                "# TYPE sicurre_inference_requests_total counter",
+                f"sicurre_inference_requests_total {self.request_total}",
+                "# HELP sicurre_inference_request_status_total Requests grouped by HTTP status.",
+                "# TYPE sicurre_inference_request_status_total counter",
                 *status_lines,
-                '# HELP sicurre_inference_request_latency_ms Request latency in milliseconds.',
-                '# TYPE sicurre_inference_request_latency_ms histogram',
+                "# HELP sicurre_inference_request_latency_ms Request latency in milliseconds.",
+                "# TYPE sicurre_inference_request_latency_ms histogram",
                 *latency_bucket_lines,
                 f'sicurre_inference_request_latency_ms_bucket{{le="+Inf"}} {cumulative}',
-                f'sicurre_inference_request_latency_ms_sum {round(self.total_latency_ms_sum, 6)}',
-                f'sicurre_inference_request_latency_ms_count {self.total_latency_ms_count}',
-                f'sicurre_inference_request_latency_ms_max {round(self.total_latency_ms_max, 6)}',
-                '# HELP sicurre_inference_mode_request_latency_ms Latency by bounded mode.',
-                '# TYPE sicurre_inference_mode_request_latency_ms histogram',
+                f"sicurre_inference_request_latency_ms_sum {round(self.total_latency_ms_sum, 6)}",
+                f"sicurre_inference_request_latency_ms_count {self.total_latency_ms_count}",
+                f"sicurre_inference_request_latency_ms_max {round(self.total_latency_ms_max, 6)}",
+                "# HELP sicurre_inference_mode_request_latency_ms Latency by bounded mode.",
+                "# TYPE sicurre_inference_mode_request_latency_ms histogram",
                 *mode_latency_lines,
-                '# HELP sicurre_inference_verdict_total Verdict counts returned by the service.',
-                '# TYPE sicurre_inference_verdict_total counter',
+                "# HELP sicurre_inference_verdict_total Verdict counts returned by the service.",
+                "# TYPE sicurre_inference_verdict_total counter",
                 *verdict_lines,
-                '# HELP sicurre_inference_label_total Label verdict counts.',
-                '# TYPE sicurre_inference_label_total counter',
+                "# HELP sicurre_inference_label_total Label verdict counts.",
+                "# TYPE sicurre_inference_label_total counter",
                 *label_lines,
-                '# HELP sicurre_inference_label_distribution_total Summed label probabilities.',
-                '# TYPE sicurre_inference_label_distribution_total counter',
+                "# HELP sicurre_inference_label_distribution_total Summed label probabilities.",
+                "# TYPE sicurre_inference_label_distribution_total counter",
                 *label_distribution_lines,
-                '# HELP sicurre_inference_stage_latency_ms_sum Stage latency in milliseconds.',
-                '# TYPE sicurre_inference_stage_latency_ms_sum counter',
+                "# HELP sicurre_inference_stage_latency_ms_sum Stage latency in milliseconds.",
+                "# TYPE sicurre_inference_stage_latency_ms_sum counter",
                 *stage_latency_sum_lines,
-                '# HELP sicurre_inference_stage_latency_ms_count Stage latency observations.',
-                '# TYPE sicurre_inference_stage_latency_ms_count counter',
+                "# HELP sicurre_inference_stage_latency_ms_count Stage latency observations.",
+                "# TYPE sicurre_inference_stage_latency_ms_count counter",
                 *stage_latency_count_lines,
-                '# HELP sicurre_inference_llm_provider_total LLM provider usage counts.',
-                '# TYPE sicurre_inference_llm_provider_total counter',
+                "# HELP sicurre_inference_llm_provider_total LLM provider usage counts.",
+                "# TYPE sicurre_inference_llm_provider_total counter",
                 *llm_provider_lines,
-                '# HELP sicurre_inference_llm_provider_outcome_total '
-                'LLM provider outcomes by category, including failures.',
-                '# TYPE sicurre_inference_llm_provider_outcome_total counter',
+                "# HELP sicurre_inference_llm_provider_outcome_total "
+                "LLM provider outcomes by category, including failures.",
+                "# TYPE sicurre_inference_llm_provider_outcome_total counter",
                 *provider_outcome_lines,
-                '# HELP sicurre_inference_stage_label_total '
-                'Predicted label counts per semantic stage.',
-                '# TYPE sicurre_inference_stage_label_total counter',
+                "# HELP sicurre_inference_stage_label_total "
+                "Predicted label counts per semantic stage.",
+                "# TYPE sicurre_inference_stage_label_total counter",
                 *stage_label_lines,
-                '# HELP sicurre_inference_stage_agreement_total '
-                'Local model versus LLM label pairs, for fusion weight tuning.',
-                '# TYPE sicurre_inference_stage_agreement_total counter',
+                "# HELP sicurre_inference_stage_agreement_total "
+                "Local model versus LLM label pairs, for fusion weight tuning.",
+                "# TYPE sicurre_inference_stage_agreement_total counter",
                 *stage_agreement_lines,
-                '# HELP sicurre_inference_error_total Runtime error counts.',
-                '# TYPE sicurre_inference_error_total counter',
+                "# HELP sicurre_inference_error_total Runtime error counts.",
+                "# TYPE sicurre_inference_error_total counter",
                 *error_lines,
-                '# HELP sicurre_inference_degradation_total '
-                'Successful requests with reduced decision quality.',
-                '# TYPE sicurre_inference_degradation_total counter',
+                "# HELP sicurre_inference_degradation_total "
+                "Successful requests with reduced decision quality.",
+                "# TYPE sicurre_inference_degradation_total counter",
                 *degradation_lines,
-                '# HELP sicurre_inference_model_info Model identity exposed as a gauge.',
-                '# TYPE sicurre_inference_model_info gauge',
+                "# HELP sicurre_inference_model_info Model identity exposed as a gauge.",
+                "# TYPE sicurre_inference_model_info gauge",
                 f'sicurre_inference_model_info{{version="{model_version}"}} 1',
             ]
 

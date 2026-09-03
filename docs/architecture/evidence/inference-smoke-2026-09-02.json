@@ -1,0 +1,305 @@
+{
+  "evidence_schema_version": 1,
+  "observed_date": "2026-09-02",
+  "timed_run_started_at": "2026-09-02T18:51:29.418910+00:00",
+  "purpose": "Authenticated inference smoke observations, not an end-to-end benchmark or an accuracy evaluation.",
+  "method": {
+    "client": "httpx, one persistent client per environment, trust_env=false",
+    "timing": "Client HTTP round trip for POST /v1/classify",
+    "client_timeout_seconds": 20,
+    "automatic_retries": 0,
+    "pacing": "Sequential, approximately 1.1 seconds between requests",
+    "use_virustotal": false,
+    "inputs": "Three synthetic French input categories with unique appended references; no real email content.",
+    "runtime_state": "Already-running services; not cold model loading. First request per environment may include connection setup.",
+    "sample_size_per_environment_and_mode": 3,
+    "raw_inputs_retained": false,
+    "repeatability_limit": "Observations and method retained; exact generated inputs and ad-hoc harness are not preserved here.",
+    "excluded_claims": [
+      "end-to-end email delivery latency",
+      "p95 or p99",
+      "worst-case latency",
+      "load capacity",
+      "representative error rate",
+      "classification accuracy",
+      "provider failover reliability"
+    ]
+  },
+  "health_and_readiness": {
+    "local": {
+      "health": 200,
+      "ready": 200
+    },
+    "production": {
+      "health": 200,
+      "ready": 200
+    }
+  },
+  "manifests": {
+    "local": {
+      "schema_version": 1,
+      "service": {
+        "name": "sicurre-ml",
+        "version": "0.1.0",
+        "api_contract": "v1"
+      },
+      "model": {
+        "version": "phishing-detector-1.0.0",
+        "requested_revision": "production",
+        "revision": "86e90dc5ff205a9711afe5de696f3d81ab8432be"
+      },
+      "dataset": {
+        "version": "unknown"
+      },
+      "deployment": {
+        "revision": "latest",
+        "container_image_digest": "unknown"
+      }
+    },
+    "production": {
+      "schema_version": 1,
+      "service": {
+        "name": "sicurre-ml",
+        "version": "0.2.0",
+        "api_contract": "v1"
+      },
+      "model": {
+        "version": "phishing-detector-1.0.0",
+        "requested_revision": "86e90dc5ff205a9711afe5de696f3d81ab8432be",
+        "revision": "86e90dc5ff205a9711afe5de696f3d81ab8432be"
+      },
+      "dataset": {
+        "version": "unknown"
+      },
+      "deployment": {
+        "revision": "a93baf728634e7de6956a91ecb8d6d1d5f228a6c",
+        "container_image_digest": "sha256:0cda00b3c8cea99c0059c0b33ef8c87aa56e01c8ff1232dda553c48ee75069e5"
+      }
+    }
+  },
+  "groups": [
+    {
+      "environment": "local",
+      "use_llm": false,
+      "count": 3,
+      "median_ms": 151.24,
+      "min_ms": 64.12,
+      "max_ms": 190.21,
+      "observations": [
+        {
+          "input_category": "short",
+          "text_length_characters": 237,
+          "http_status": 200,
+          "client_elapsed_ms": 190.21,
+          "final_label": "legitimate",
+          "onnx_label": "legitimate",
+          "llm_provider": null,
+          "llm_active": false,
+          "llm_label": null,
+          "degraded_reasons": []
+        },
+        {
+          "input_category": "newsletter",
+          "text_length_characters": 483,
+          "http_status": 200,
+          "client_elapsed_ms": 64.12,
+          "final_label": "spam",
+          "onnx_label": "spam",
+          "llm_provider": null,
+          "llm_active": false,
+          "llm_label": null,
+          "degraded_reasons": []
+        },
+        {
+          "input_category": "long",
+          "text_length_characters": 2248,
+          "http_status": 200,
+          "client_elapsed_ms": 151.24,
+          "final_label": "legitimate",
+          "onnx_label": "legitimate",
+          "llm_provider": null,
+          "llm_active": false,
+          "llm_label": null,
+          "degraded_reasons": []
+        }
+      ]
+    },
+    {
+      "environment": "local",
+      "use_llm": true,
+      "count": 3,
+      "median_ms": 900.95,
+      "min_ms": 829.3,
+      "max_ms": 1073.15,
+      "observations": [
+        {
+          "input_category": "short",
+          "text_length_characters": 237,
+          "http_status": 200,
+          "client_elapsed_ms": 1073.15,
+          "final_label": "legitimate",
+          "onnx_label": "legitimate",
+          "llm_provider": "mistral",
+          "llm_active": true,
+          "llm_label": "uncertain",
+          "degraded_reasons": []
+        },
+        {
+          "input_category": "newsletter",
+          "text_length_characters": 483,
+          "http_status": 200,
+          "client_elapsed_ms": 900.95,
+          "final_label": "spam",
+          "onnx_label": "spam",
+          "llm_provider": "mistral",
+          "llm_active": true,
+          "llm_label": "uncertain",
+          "degraded_reasons": []
+        },
+        {
+          "input_category": "long",
+          "text_length_characters": 2248,
+          "http_status": 200,
+          "client_elapsed_ms": 829.3,
+          "final_label": "legitimate",
+          "onnx_label": "legitimate",
+          "llm_provider": "mistral",
+          "llm_active": true,
+          "llm_label": "uncertain",
+          "degraded_reasons": []
+        }
+      ]
+    },
+    {
+      "environment": "production",
+      "use_llm": false,
+      "count": 3,
+      "median_ms": 489.76,
+      "min_ms": 462.12,
+      "max_ms": 634.18,
+      "observations": [
+        {
+          "input_category": "short",
+          "text_length_characters": 237,
+          "http_status": 200,
+          "client_elapsed_ms": 489.76,
+          "final_label": "legitimate",
+          "onnx_label": "legitimate",
+          "llm_provider": null,
+          "llm_active": false,
+          "llm_label": null,
+          "degraded_reasons": []
+        },
+        {
+          "input_category": "newsletter",
+          "text_length_characters": 483,
+          "http_status": 200,
+          "client_elapsed_ms": 462.12,
+          "final_label": "spam",
+          "onnx_label": "spam",
+          "llm_provider": null,
+          "llm_active": false,
+          "llm_label": null,
+          "degraded_reasons": []
+        },
+        {
+          "input_category": "long",
+          "text_length_characters": 2248,
+          "http_status": 200,
+          "client_elapsed_ms": 634.18,
+          "final_label": "legitimate",
+          "onnx_label": "legitimate",
+          "llm_provider": null,
+          "llm_active": false,
+          "llm_label": null,
+          "degraded_reasons": []
+        }
+      ]
+    },
+    {
+      "environment": "production",
+      "use_llm": true,
+      "count": 3,
+      "median_ms": 864.72,
+      "min_ms": 758.12,
+      "max_ms": 1135.51,
+      "observations": [
+        {
+          "input_category": "short",
+          "text_length_characters": 237,
+          "http_status": 200,
+          "client_elapsed_ms": 864.72,
+          "final_label": "legitimate",
+          "onnx_label": "legitimate",
+          "llm_provider": "mistral",
+          "llm_active": true,
+          "llm_label": "uncertain",
+          "degraded_reasons": []
+        },
+        {
+          "input_category": "newsletter",
+          "text_length_characters": 483,
+          "http_status": 200,
+          "client_elapsed_ms": 1135.51,
+          "final_label": "spam",
+          "onnx_label": "spam",
+          "llm_provider": "mistral",
+          "llm_active": true,
+          "llm_label": "uncertain",
+          "degraded_reasons": []
+        },
+        {
+          "input_category": "long",
+          "text_length_characters": 2248,
+          "http_status": 200,
+          "client_elapsed_ms": 758.12,
+          "final_label": "legitimate",
+          "onnx_label": "legitimate",
+          "llm_provider": "mistral",
+          "llm_active": true,
+          "llm_label": "uncertain",
+          "degraded_reasons": []
+        }
+      ]
+    }
+  ],
+  "additional_isolated_local_request": {
+    "use_llm": false,
+    "http_status": 200,
+    "observed_classification_count_delta": 1,
+    "client_elapsed_ms": 140.34,
+    "server_request_latency_ms": 135.572,
+    "stage_latencies_ms": {
+      "onnx": 134.657,
+      "rules": 0.101,
+      "blocklist": 0.088,
+      "llm": 0
+    },
+    "measurement": "Server and stage timings obtained from metric counter deltas around one additional local request."
+  },
+  "observed_production_configuration": {
+    "LLM_TOTAL_TIMEOUT_SECONDS": 7.5,
+    "LLM_PROVIDER_TIMEOUT_SECONDS": 4.5,
+    "LLM_CONNECT_TIMEOUT_SECONDS": 1,
+    "LLM_MAX_ATTEMPTS": 1,
+    "MISTRAL_MODEL": "mistral-medium-2604",
+    "GROQ_MODEL": "openai/gpt-oss-120b",
+    "ONNX_NUM_THREADS": 2,
+    "finite_request_histogram_buckets_ms": [
+      25,
+      50,
+      100,
+      250,
+      500,
+      1000,
+      2000,
+      5000
+    ]
+  },
+  "provenance_limitations": [
+    "Manifest labels were reported by the runtime; not independent artifact or registry verification.",
+    "Both environments reported dataset.version=unknown; lineage was not invented or repaired.",
+    "All six LLM-enabled observations had llm_label=uncertain despite successful provider responses.",
+    "No training, promotion, deployment, or production configuration changes were performed."
+  ]
+}
