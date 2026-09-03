@@ -78,8 +78,17 @@ calls and should be analyzed separately from local blocklist lookups.
 | `label_verdict` | Three-class classification |
 | `label_distribution` | Bounded per-class distribution |
 | `stage_latencies_ms` | Timing object keyed by pipeline stage |
+| `stage_labels` | Label each stage produced, e.g. `{"onnx": "phishing", "llm": "legitimate"}` — present when stages ran |
 | `llm_provider` | Selected provider or null |
 | `error_type` | Bounded error category where applicable |
+| `mode` | `llm` or `local`, bounded; `unknown` when a request failed before the mode was resolved |
+
+`stage_labels` and `mode` make a single log line self-diagnosing. The Prometheus
+recorder builds the ONNX-vs-LLM agreement matrix from `stage_labels` in
+aggregate, but an aggregate cannot say whether the LLM overrode the ONNX stage
+on one specific request. The log now can, which is the first question worth
+asking about a wrong verdict. `mode` is held to `{local, llm}` — the same closed
+set the recorder uses — so an unexpected value cannot widen the log.
 
 This is not the same schema as the identity manifest: there,
 `model.version` is the readable version label and `model.revision` is the SHA.
