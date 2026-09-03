@@ -84,7 +84,8 @@ prometheus.remote_write "grafana_cloud" {{
 }}
 ''')
     dashboard = json.loads(Path("deploy/grafana/dashboards/sicurre-ml-runtime.json").read_text())
-    health = next(p for p in dashboard["panels"] if p["title"] == "Public API")
+    health_row = next(p for p in dashboard["panels"] if p["title"] == "Service health")
+    health = next(p for p in health_row["panels"] if p["title"] == "Public API")
     expr = health["targets"][0]["expr"]
 
     def value(query: str, at: float | None = None) -> float | None:
