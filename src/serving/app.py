@@ -377,8 +377,10 @@ def classify(
         label_verdict=response.label_verdict,
         label_distribution=response.label_distribution,
         stage_latencies_ms=result.stage_latencies_ms,
+        stage_labels=result.stage_labels,
         llm_provider=response.llm_provider,
         model_version=onnx_classifier.get_model_version(),
+        mode="llm" if request.use_llm else "local",
     )
     for header, value in response_identity_headers().items():
         http_response.headers[header] = value

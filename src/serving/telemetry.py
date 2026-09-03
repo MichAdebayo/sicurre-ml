@@ -411,6 +411,16 @@ def emit_classify_request_log(
         payload["llm_provider"] = llm_provider or None
     if error_type is not None:
         payload["error_type"] = error_type
+    if stage_labels:
+        # Which label each stage produced, e.g. {"onnx": "phishing",
+        # "llm": "legitimate"}. The Prometheus recorder builds the ONNX-vs-LLM
+        # agreement matrix from this in aggregate; writing it here lets a single
+        # bad verdict be diagnosed from its own log line - specifically whether
+        # the LLM overrode the ONNX stage - which the aggregate cannot answer.
+        payload["stage_labels"] = dict(stage_labels)
+    # Bounded to the same closed set the recorder uses, so the log's value space
+    # cannot widen if an unexpected mode is ever passed.
+    payload["mode"] = mode if mode in {"local", "llm"} else "unknown"
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True), flush=True)
 
 
