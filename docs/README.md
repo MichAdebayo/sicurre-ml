@@ -4,8 +4,8 @@ Documentation for the model layer of Sicurre: training, evaluation, promotion,
 and the ONNX inference service. The companion `sicurre` repo documents
 ingestion, the data platform, and the application runtime.
 
-Start at the [root README](../README.md) for the system diagram and service
-levels at a glance.
+Start at the [root README](../README.md) for the system diagram and a bounded
+summary of the available evidence.
 
 ## Read these first
 
@@ -19,11 +19,13 @@ levels at a glance.
 
 | Document | Scope |
 |----------|-------|
-| [Performance and quality](architecture/performance.md) | Measured latency, the two-second bar, and the rules for replacing the production model |
+| [Performance and quality](architecture/performance.md) | Measured latency, method limitations, configured budgets, and model evaluation evidence |
+| [Deployment identity](architecture/deployment-identity.md) | Readable model version to immutable HF SHA mapping, runtime snapshot, and missing lineage |
 | [Component design](architecture/component-design.md) | Module boundaries and the split with the companion repo |
-| [Non-functional requirements](architecture/non-functional-requirements.md) | Qualities the system must hold; numbers live in service levels |
+| [Non-functional requirements](architecture/non-functional-requirements.md) | Engineering requirements, distinct from verified results and contractual promises |
 | [Monitoring design](architecture/monitoring-design.md) | Runtime signals, log schema, alerting targets |
 | [Sync contracts](architecture/sync-contracts.md) | Dataset and callback contracts across the repo boundary |
+| [Post-deployment validation](architecture/post-deployment-validation.md) | What every deploy and promotion checks before the change is accepted |
 | [API contract and coverage policy](architecture/api-contract-and-coverage-policy.md) | Deterministic OpenAPI generation, coverage gates |
 
 ## Model
@@ -35,7 +37,7 @@ levels at a glance.
 
 ## Decisions
 
-Architecture decision records live in [adr/](adr/) — one file per decision,
+Architecture decision records live in [adr/](adr/), one file per decision,
 each stating context, decision, and consequences.
 
 | ADR | Decision |
@@ -76,10 +78,25 @@ maps deliverables to competency criteria. Per-competency notes are in
   authority, and the running deployment manifest the runtime authority. Their
   production identities must agree.
 
+## Configuration
+
+[`.env.example`](../.env.example) is the configuration reference. It lists every
+environment variable the service reads, grouped and commented, and is kept in step
+with the code rather than duplicated into prose that would drift. Values that
+change behaviour rather than credentials — the LLM chain budget, the per-provider
+timeout, the rate limit, the stage fusion weights — are documented there with
+their defaults.
+
+Production values are not always the code defaults. Where a difference matters it
+is named in [performance and quality](architecture/performance.md). The LLM
+timeouts are the clearest example: production runs 0.9 s per provider and 1.5 s
+for the chain, against code defaults of 2.5 s and 7.5 s, because the defaults
+predate the two-second objective.
+
 ## Conventions
 
 - Operational runbooks and architecture contracts stay in the repo.
 - Secrets, tokens, and provider credentials never enter version control.
 - Dataset samples are private unless explicitly sanitized for documentation.
 - Measured numbers belong in [performance](architecture/performance.md) and are
-  referenced from elsewhere, never restated — restated numbers drift.
+  referenced from elsewhere rather than independently maintained in several pages.
