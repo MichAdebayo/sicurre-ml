@@ -238,25 +238,21 @@ def test_dashboard_distinguishes_absent_telemetry_from_measured_zero() -> None:
 
 
 def test_dashboard_does_not_imply_an_unreachable_latency_threshold() -> None:
-    """The histogram tops out at 5000 ms, so no panel may promise more.
+    """No panel may cite a latency threshold the histogram cannot reach.
 
-    _PROMETHEUS_BUCKETS_MS ends at 5000, and histogram_quantile returns the
-    highest finite boundary for a quantile landing in the overflow bucket. A
-    panel citing an eight-second objective would describe something the
-    instrument cannot measure.
+    The buckets and the alert threshold only mean something together, so this
+    reads the ceiling from the emitter rather than repeating a literal. Re-cutting
+    the buckets then updates the assertion instead of stranding it.
     """
+    from src.serving.telemetry import _PROMETHEUS_BUCKETS_MS
+
     _, panels = _ml_dashboard_panels()
+    ceiling = int(max(_PROMETHEUS_BUCKETS_MS))
 
     latency = panels["ML handler latency percentiles — all modes"]
-    assert "5000" in latency["description"], "the latency panel must state the histogram ceiling"
-    assert (
-        "8"
-        not in latency["fieldConfig"]["defaults"]
-        .get("thresholds", {})
-        .get("steps", [{}])[0]
-        .get("value", "")
-        or True
-    )  # no 8s threshold is configured at all
+    assert str(ceiling) in latency["description"], (
+        f"the latency panel must state the histogram ceiling ({ceiling} ms)"
+    )
 
 
 def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:

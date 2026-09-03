@@ -328,7 +328,7 @@
     {
       "type": "timeseries",
       "title": "ML handler latency percentiles \u2014 all modes",
-      "description": "Time spent inside the ML classify handler, not end-to-end email delivery. Estimated from a classic histogram whose highest finite boundary is 5000 ms, so a quantile falling in the overflow bucket reports 5000 ms and cannot exceed it. Percentiles from a handful of requests are unstable; read them beside the request count.",
+      "description": "Time spent inside the ML classify handler, not end-to-end email delivery. Estimated from a classic histogram whose boundaries run 50 ms to 3000 ms; a quantile landing in the overflow bucket reports 3000 ms and cannot exceed it. Percentiles from a handful of requests are unstable; read them beside the request count.",
       "datasource": {
         "type": "prometheus",
         "uid": "__PROM_UID__"
@@ -693,7 +693,7 @@
         {
           "type": "timeseries",
           "title": "ML handler latency by requested mode",
-          "description": "p95 split by the mode the caller requested. mode=llm includes the provider chain, bounded in production by LLM_TOTAL_TIMEOUT_SECONDS=7.5s with LLM_PROVIDER_TIMEOUT_SECONDS=4.5s per provider; mode=local skips it. The 5000 ms histogram ceiling applies here too, so llm-mode p95 saturates before the chain budget is reached.",
+          "description": "p95 split by the mode the caller requested. mode=llm includes the provider chain, bounded in production by LLM_TOTAL_TIMEOUT_SECONDS=7.5s with LLM_PROVIDER_TIMEOUT_SECONDS=4.5s per provider; mode=local skips it. The 3000 ms histogram ceiling applies here too, so llm-mode p95 saturates before the chain budget is reached.",
           "datasource": {
             "type": "prometheus",
             "uid": "__PROM_UID__"
