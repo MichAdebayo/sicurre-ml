@@ -14,6 +14,7 @@ Training pipeline, evaluation gates, and the ONNX inference service behind
 [![Runtime](https://img.shields.io/badge/runtime-ONNX-005CED?logo=onnx&logoColor=white)](src/inference/onnx_classifier.py)
 [![Tracking](https://img.shields.io/badge/tracking-MLflow-0194E2?logo=mlflow&logoColor=white)](docs/adr/0004-mlflow-for-tracking.md)
 [![Promotion](https://img.shields.io/badge/promotion-manual%20approval-important)](docs/model/promotion-policy.md)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 </div>
 
