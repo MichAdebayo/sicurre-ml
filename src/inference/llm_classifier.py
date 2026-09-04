@@ -202,6 +202,7 @@ def _call_groq(
         mail_context=mail_context,
         provider="groq",
         timeout_seconds=timeout_seconds,
+        extra_body={"reasoning_effort": os.getenv("GROQ_REASONING_EFFORT", "low")},
     )
 
 
@@ -245,6 +246,7 @@ def _openai_compatible(
     mail_context: MailContext | None,
     provider: str,
     timeout_seconds: float | None,
+    extra_body: dict[str, object] | None = None,
 ) -> LLMResult | None:
     try:
         response = _resilient_post(
@@ -271,6 +273,7 @@ def _openai_compatible(
                     },
                 ],
                 "response_format": {"type": "json_object"},
+                **(extra_body or {}),
             },
             timeout_seconds=timeout_seconds,
         )
@@ -281,7 +284,11 @@ def _openai_compatible(
             _record_provider_result(provider, success=False, now=time.monotonic())
         return parsed
     except httpx.HTTPStatusError as exc:
-        _emit_provider_event(provider, f"http_{exc.response.status_code}")
+        _emit_provider_event(
+            provider,
+            f"http_{exc.response.status_code}",
+            detail=exc.response.text[:300],
+        )
         return None
     except Exception as exc:
         _emit_provider_event(provider, _exception_category(exc))
@@ -308,10 +315,7 @@ def _fallback_probabilities(label: str, confidence: float) -> dict[str, float]:
     if label not in _LABELS:
         return {item: 1.0 / 3.0 for item in _LABELS}
     residual = (1.0 - confidence) / 2.0
-    return {
-        item: confidence if item == label else residual
-        for item in _LABELS
-    }
+    return {item: confidence if item == label else residual for item in _LABELS}
 
 
 def _parse_response(raw: str, provider: str) -> LLMResult | None:
@@ -374,23 +378,25 @@ _provider_events: Counter[tuple[str, str]] = Counter()
 _provider_events_lock = Lock()
 
 
-def _emit_provider_event(provider: str, category: str) -> None:
+def _emit_provider_event(provider: str, category: str, *, detail: str | None = None) -> None:
     """Record a provider outcome as both a log line and a countable metric.
 
     The log alone cannot answer "which provider is failing, and how often" in
     Grafana, which is the question that decides provider ordering and timeouts.
-    Cardinality stays bounded: providers and categories are both closed sets.
+    Cardinality stays bounded: providers and categories are both closed sets, so
+    `detail` is carried on the log line only and never reaches the metric key.
     """
 
     with _provider_events_lock:
         _provider_events[(provider, category)] += 1
-    print(
-        json.dumps(
-            {"event": "llm_provider", "provider": provider, "category": category},
-            sort_keys=True,
-        ),
-        flush=True,
-    )
+    event: dict[str, str] = {
+        "event": "llm_provider",
+        "provider": provider,
+        "category": category,
+    }
+    if detail:
+        event["detail"] = detail
+    print(json.dumps(event, sort_keys=True), flush=True)
 
 
 def provider_event_snapshot() -> dict[tuple[str, str], int]:
