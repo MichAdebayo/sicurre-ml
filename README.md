@@ -108,6 +108,15 @@ gates total latency. **When the whole provider chain fails, the pipeline records
 `llm_unavailable` and still returns a verdict from the remaining stages.** The
 service keeps working when the providers do not.
 
+Groq serves `openai/gpt-oss-*`, which reason before answering. Reasoning tokens
+are drawn from the same `LLM_MAX_OUTPUT_TOKENS` budget as the answer, so a long
+enough message exhausts it and the model returns nothing — which Groq rejects as
+`json_validate_failed`, a 400 rather than a timeout. The request therefore sends
+`reasoning_effort` (`GROQ_REASONING_EFFORT`, default `low`), which bounds the
+reasoning and shortens the stage. Provider failures log the response body,
+because a bare status code cannot separate an invalid model from an exhausted
+budget.
+
 ## Performance
 
 Authenticated smoke checks on 2 September 2026 exercised the running local and
@@ -139,7 +148,7 @@ The checked-in contract and `make openapi-check` remain unchanged.
 | `GET` | `/v1/ready` | None | 200 when model loaded, 503 when not ready |
 | `GET` | `/v1/metrics` | Internal network | Plain-text metrics; blocked by the public reverse proxy |
 | `POST` | `/v1/classify` | Bearer | Classify an email |
-| `GET` | `/v1/manifest` | Bearer | Deployed model identity |
+| `GET` | `/v1/manifest` | Bearer | Deployed model identity and LLM provider configuration |
 
 Rate limiting defaults to 1 rps sustained with a burst of 5
 (`INFERENCE_RATE_LIMIT_RPS`, `INFERENCE_RATE_LIMIT_BURST`).
@@ -148,6 +157,10 @@ The manifest maps the human-readable `model.version` to the loaded immutable
 Hugging Face `model.revision`. Service version, training dataset version, and
 container digest remain separate identities. See
 [deployment identity](docs/architecture/deployment-identity.md).
+
+Its `llm` block reports which providers are configured and which model each is
+pinned to, so a misconfigured provider is visible without reading the container
+environment. It reports names only, never keys.
 
 ## Model and training
 
