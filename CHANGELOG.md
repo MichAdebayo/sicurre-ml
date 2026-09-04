@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.5.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.4.0...v0.5.0) (2026-09-04)
+
+
+### Features
+
+* **manifest:** report which provider models the process will call ([c20bd2b](https://github.com/MichAdebayo/sicurre-ml/commit/c20bd2b0a7cc17d20e05de74df4e337c3cc92b93))
+
+
+### Bug Fixes
+
+* **alloy:** keep log read positions across a deploy ([#157](https://github.com/MichAdebayo/sicurre-ml/issues/157)) ([70e19d4](https://github.com/MichAdebayo/sicurre-ml/commit/70e19d4ee3e2697e6d97134ec91908ce0f06e747))
+* **api:** promote local-only inference documentation ([7f6c6d7](https://github.com/MichAdebayo/sicurre-ml/commit/7f6c6d7b512f418f329f61c2472c6afe23069ca0))
+* **api:** restrict documentation to local development ([b3747ce](https://github.com/MichAdebayo/sicurre-ml/commit/b3747ced1e00b1faf37d28a5e6cebbab4da8aca0))
+* **api:** restrict documentation to local development ([3793c8f](https://github.com/MichAdebayo/sicurre-ml/commit/3793c8fc357b9898b379e890b0795c5fd1a405ea)), closes [#168](https://github.com/MichAdebayo/sicurre-ml/issues/168)
+* **api:** ship local-only inference documentation ([d2f4642](https://github.com/MichAdebayo/sicurre-ml/commit/d2f4642a6690304cb1c3a976acb2e844c33885f4))
+* **grafana:** give overview cards room and separate diagnostics ([6271996](https://github.com/MichAdebayo/sicurre-ml/commit/6271996c53c955c3e69ca0af80d3e7d9ec84ba67))
+* **grafana:** restore roomy desktop dashboard proportions ([7cf5c48](https://github.com/MichAdebayo/sicurre-ml/commit/7cf5c48da53d1732d67f9c48652a71403d4f9509))
+* **grafana:** standardize availability labels as up and down ([33f0094](https://github.com/MichAdebayo/sicurre-ml/commit/33f0094eff6b1538221efcfdc7403011dcb7b041))
+* **llm:** restore Groq availability in production ([9cfddef](https://github.com/MichAdebayo/sicurre-ml/commit/9cfddef5be336c5a0ca77fa5627b7ddd1158b6f4))
+* **llm:** stop Groq returning 400 on longer messages ([1a6cbe9](https://github.com/MichAdebayo/sicurre-ml/commit/1a6cbe98ed1955e9394577cef8c36f79df5e932f))
+* **llm:** stop Groq returning 400 on longer messages ([a3e9e3d](https://github.com/MichAdebayo/sicurre-ml/commit/a3e9e3dc63dbee21ca17890f70379cce92759ff3))
+* **llm:** use a Groq model that can emit JSON within the token budget ([ae221f6](https://github.com/MichAdebayo/sicurre-ml/commit/ae221f696b09bc5b93430d5e51aeaa2c74ea5ec0))
+* **llm:** working Groq model, and make the configured model verifiable ([7920c21](https://github.com/MichAdebayo/sicurre-ml/commit/7920c213e4d1fe24bc641b9dcc9534ed3727b98c))
+* **monitoring:** add public health probe and clarify runtime dashboard ([3efd21e](https://github.com/MichAdebayo/sicurre-ml/commit/3efd21e792189abaf4ad365734767977e0cd2e6c))
+* **monitoring:** probe public health and organize inference dashboard ([5df85a3](https://github.com/MichAdebayo/sicurre-ml/commit/5df85a32285582750a55c1ab07bf6053a22771ca))
+* **monitoring:** promote ML health and dashboard improvements ([09f5e82](https://github.com/MichAdebayo/sicurre-ml/commit/09f5e828e91ce389d4130461a8b9f75d75e6d492))
+* **monitoring:** release public ML health probe and runtime dashboard ([d330bd8](https://github.com/MichAdebayo/sicurre-ml/commit/d330bd8c43fc67fccac8d00ce914d259e74bb44b))
+* **telemetry:** write stage_labels and mode to the classify log ([#173](https://github.com/MichAdebayo/sicurre-ml/issues/173)) ([1ab11b5](https://github.com/MichAdebayo/sicurre-ml/commit/1ab11b50c72b5dedc451bd157b24bd9e2c6121bd))
+
+
+### Documentation
+
+* add the MIT licence text and a licence badge ([310c556](https://github.com/MichAdebayo/sicurre-ml/commit/310c556d13b313ef285faa6d41bda303a8e94d3d))
+* correct the per-provider LLM timeout to 1.5s ([df35778](https://github.com/MichAdebayo/sicurre-ml/commit/df35778e0e5f2e1e86d95120f60b6f2c63759a3a))
+* MIT licence text ([79013a3](https://github.com/MichAdebayo/sicurre-ml/commit/79013a3ac4b8e3d04e7530585b764c1fa765ebe0))
+* MIT licence text ([677a104](https://github.com/MichAdebayo/sicurre-ml/commit/677a104c435d9617a714593e05bd54b8ba37ccaa))
+* **readme:** record the Groq reasoning-token constraint ([b567d8c](https://github.com/MichAdebayo/sicurre-ml/commit/b567d8cbdd158be72607d5ba64fe97a2626e5a5d))
+* **readme:** record the Groq reasoning-token constraint ([382c01a](https://github.com/MichAdebayo/sicurre-ml/commit/382c01a3557609526be45c8eedc017aa88d6752c))
+* **readme:** record the Groq reasoning-token constraint ([5ccf165](https://github.com/MichAdebayo/sicurre-ml/commit/5ccf165ae20eab0b2608cc887c0cd0cf5ef4e7a4))
+
 ## [0.4.0](https://github.com/MichAdebayo/sicurre-ml/compare/v0.3.0...v0.4.0) (2026-09-03)
 
 
