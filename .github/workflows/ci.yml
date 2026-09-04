@@ -4,9 +4,15 @@ name: CI
 # Checks run independently in parallel. CD remains gated on the completed CI workflow.
 # Merges to main are blocked by GitHub branch protection if any job fails.
 on:
+  workflow_dispatch:
+  # Scoped to the branches that gate a release. Pushing to a feature branch or
+  # to mlops no longer spends a full CI run; the first gate is the PR into
+  # develop, and the second the PR into main - matching the sicurre repository.
+  # CD still fires, because it keys off CI completing on main.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+    branches: [develop, main]
 
 env:
   PYTHON_VERSION: "3.12"

@@ -194,7 +194,7 @@ def _call_groq(
     return _openai_compatible(
         base_url="https://api.groq.com/openai/v1",
         api_key=api_key,
-        model=os.getenv("GROQ_MODEL", "llama-3.1-8b-instant"),
+        model=os.getenv("GROQ_MODEL", "openai/gpt-oss-20b"),
         temperature=_env_float("GROQ_MODEL_TEMPERATURE", 0.0, minimum=0.0),
         text=text,
         sender=sender,
