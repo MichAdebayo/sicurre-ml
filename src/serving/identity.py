@@ -26,6 +26,26 @@ def deployment_manifest() -> dict[str, Any]:
             "revision": os.getenv("DEPLOYMENT_REVISION", os.getenv("IMAGE_TAG", "unknown")),
             "container_image_digest": os.getenv("CONTAINER_IMAGE_DIGEST", "unknown"),
         },
+        # Which provider models this process will actually call. Model names are
+        # not secrets, and without them the only way to check whether an env
+        # change reached the container was shell access to the host - which is
+        # how a decommissioned Groq model went unnoticed while every
+        # classification silently degraded to ONNX alone. Keys are never
+        # reported, only whether one is configured.
+        "llm": {
+            "groq_model": os.getenv("GROQ_MODEL", "(default)"),
+            "mistral_model": os.getenv("MISTRAL_MODEL", "(default)"),
+            "cerebras_model": os.getenv("CEREBRAS_MODEL", "(default)"),
+            "providers_configured": sorted(
+                name
+                for name, key in (
+                    ("groq", "GROQ_API_KEY"),
+                    ("mistral", "MISTRAL_API_KEY"),
+                    ("cerebras", "CEREBRAS_API_KEY"),
+                )
+                if os.getenv(key)
+            ),
+        },
     }
 
 

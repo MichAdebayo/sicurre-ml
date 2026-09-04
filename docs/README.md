@@ -89,7 +89,7 @@ their defaults.
 
 Production values are not always the code defaults. Where a difference matters it
 is named in [performance and quality](architecture/performance.md). The LLM
-timeouts are the clearest example: production runs 0.9 s per provider and 1.5 s
+timeouts are the clearest example: production runs 1.5 s per provider and 1.5 s
 for the chain, against code defaults of 2.5 s and 7.5 s, because the defaults
 predate the two-second objective.
 

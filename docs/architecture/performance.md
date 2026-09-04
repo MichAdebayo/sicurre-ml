@@ -102,7 +102,7 @@ These numbers have different scopes:
 | Setting | Production, from 3 September 2026 | Previously | Meaning |
 |---------|-----------------------------------|-----------|---------|
 | `LLM_TOTAL_TIMEOUT_SECONDS` | 1.5 s | 7.5 s | Budget for the whole provider chain |
-| `LLM_PROVIDER_TIMEOUT_SECONDS` | 0.9 s | 4.5 s | Per-provider HTTP timeout |
+| `LLM_PROVIDER_TIMEOUT_SECONDS` | 1.5 s | 4.5 s | Per-provider HTTP timeout |
 | `LLM_CONNECT_TIMEOUT_SECONDS` | 0.3 s | 1 s | Connection establishment |
 | `LLM_MAX_ATTEMPTS` | 1 | 1 | Attempts per provider — no retry multiplication |
 | LLM-mode request p95 alert | 2 s | 8 s | Operational warning threshold |
@@ -124,10 +124,29 @@ scan to ML, and the response — is estimated at about 315 ms. ONNX and the LLM
 run in parallel, so the LLM budget replaces the ONNX cost rather than adding to
 it. That leaves roughly 1,670 ms before two seconds is breached.
 
-`0.9 s` per provider clears the observed worst with headroom while cutting off a
-hung provider quickly. `1.5 s` for the chain means a first-provider timeout still
-leaves 600 ms for the second — enough for a typical 457 ms response, so the
-fallback stays useful rather than nominal. Worst case is about **1.83 s**.
+### Correction, 4 September 2026
+
+The per-provider budget was first set to `0.9 s` on that reasoning, and it was
+wrong. The 457 ms median and 714 ms worst are the LLM's **marginal** cost
+measured from a laptop, with ONNX running in parallel and roughly 200 ms of
+client round trip folded in. They are not the provider's own HTTP latency, which
+the classifier records as a **~1.1 s median**. The cap was therefore set below
+the median it had to clear, and the provider timed out on most calls.
+
+The failure was silent by design: a timed-out chain degrades to ONNX rather than
+erroring, so requests still returned `200` with a verdict. Production logs showed
+`llm_provider: null` and `stage_labels` carrying only `onnx`, while the `llm`
+stage consumed ~846 ms — the 0.9 s cap, hit and abandoned. The pipeline was
+advertised as multi-stage and was running one stage.
+
+`1.5 s` per provider now clears the observed median with headroom. Worst case is
+about **1.82 s**, still inside the objective.
+
+**One consequence to note.** The per-provider budget now equals the whole-chain
+budget, so a first-provider timeout exhausts the deadline and the second provider
+is never tried — the chain is one attempt, not two. That is the deliberate trade
+for the LLM completing at all. Raising `LLM_TOTAL_TIMEOUT_SECONDS` to about
+`2.5 s` would restore failover at the cost of a worst case past two seconds.
 
 These are budgets, not wall-clock guarantees; see the HTTPX note below.
 
