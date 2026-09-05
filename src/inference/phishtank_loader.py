@@ -1,4 +1,8 @@
-"""Load the PhishTank blocklist from Neon, with a warmed file fallback."""
+"""Load the PhishTank blocklist from the data platform, with a file fallback.
+
+The data platform is Postgres in production and SQLite for the POC, so both are
+read here; pointing the POC at Postgres was reaching production instead.
+"""
 
 from __future__ import annotations
 
@@ -31,17 +35,62 @@ def _fallback_path() -> Path | None:
     return Path(path) if path else None
 
 
+def _sqlite_path(conninfo: str) -> str | None:
+    """Return the file path when the URL names a SQLite database, else None."""
+    # SQLAlchemy spells an absolute path with four slashes and a relative one
+    # with three, so the remainder after the three-slash prefix is the path
+    # either way - keeping an extra slash makes SQLite read the first segment
+    # as a URI authority.
+    for prefix in ("sqlite+aiosqlite:///", "sqlite+pysqlite:///", "sqlite:///"):
+        if conninfo.startswith(prefix):
+            return conninfo[len(prefix) :]
+    return None
+
+
+def _load_phishtank_urls_from_sqlite(path: str) -> list[str]:
+    """Read the blocklist from a local SQLite data platform.
+
+    The POC runs the data platform on SQLite, so pointing the loader at a
+    Postgres URL was the only way to get a blocklist locally - which meant
+    development reached for the production database, and fell back to a stale
+    one-URL file when that failed.
+    """
+    import sqlite3
+
+    query = """
+    select distinct json_extract(raw_content, '$.url') as url
+    from data_raw_record
+    where json_valid(raw_content)
+      and json_extract(raw_content, '$.source') = 'phishtank_api'
+      and coalesce(json_extract(raw_content, '$.url'), '') <> ''
+    order by url;
+    """
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+        rows = conn.execute(query).fetchall()
+    return _canonicalize_urls([row[0] for row in rows if row[0]])
+
+
 def _load_phishtank_urls_from_database() -> list[str]:
     conninfo = os.getenv("SICURRE_DATA_PLATFORM_DATABASE_URL")
     if not conninfo:
         raise RuntimeError("SICURRE_DATA_PLATFORM_DATABASE_URL is not configured")
 
+    sqlite_path = _sqlite_path(conninfo)
+    if sqlite_path:
+        return _load_phishtank_urls_from_sqlite(sqlite_path)
+
     import psycopg
 
+    # data_raw_record holds more than JSON payloads: operator mailbox exports
+    # and dropzone TXT files store raw message text, which the ::jsonb cast
+    # cannot parse. Postgres may evaluate that cast before the source filter, so
+    # one such row fails the whole query and the blocklist silently falls back
+    # to the file. pg_input_is_valid (PostgreSQL 16+) guards it per row.
     query = """
     select distinct raw_content::jsonb->>'url' as url
     from public.data_raw_record
-    where raw_content::jsonb->>'source' = 'phishtank_api'
+    where pg_input_is_valid(raw_content, 'jsonb')
+      and raw_content::jsonb->>'source' = 'phishtank_api'
       and coalesce(raw_content::jsonb->>'url', '') <> ''
     order by url;
     """
@@ -104,14 +153,22 @@ def load_phishtank_urls() -> list[str]:
     if source != "file":
         try:
             urls = _canonicalize_urls(_load_phishtank_urls_from_database())
-            print(f"[phishtank] Loaded {len(urls)} URLs from Neon database.")
+            backend = "sqlite" if _sqlite_path(os.getenv(
+                "SICURRE_DATA_PLATFORM_DATABASE_URL", "")) else "postgres"
+            print(f"[phishtank] Loaded {len(urls)} URLs from the data platform ({backend}).")
             try:
                 _write_fallback_file(urls)
             except Exception:
                 print("[phishtank] Fallback write skipped (write_failed).")
             return urls
-        except Exception:
-            print("[phishtank] Database load failed (source_unavailable); using fallback.")
+        except Exception as exc:
+            # The cause matters: a stale credential and a query that cannot parse
+            # a row look identical from here, and both leave the blocklist with
+            # whatever the fallback file happens to hold.
+            print(
+                f"[phishtank] Database load failed ({type(exc).__name__}: "
+                f"{str(exc)[:200]}); using fallback."
+            )
 
     return _load_phishtank_urls_from_file()
 
