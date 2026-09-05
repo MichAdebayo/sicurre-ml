@@ -83,7 +83,7 @@ def test_the_query_guards_the_json_cast() -> None:
     """
     import inspect
 
-    from inference import phishtank_loader
+    from src.inference import phishtank_loader
 
     source = inspect.getsource(phishtank_loader)
     assert "pg_input_is_valid(raw_content, 'jsonb')" in source
@@ -91,7 +91,7 @@ def test_the_query_guards_the_json_cast() -> None:
 
 def test_a_failed_database_load_reports_its_cause(monkeypatch, capsys) -> None:
     """A stale credential and an unparseable row looked identical before."""
-    from inference import phishtank_loader
+    from src.inference import phishtank_loader
 
     def _boom() -> list[str]:
         raise RuntimeError("password authentication failed")
