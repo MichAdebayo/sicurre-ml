@@ -105,3 +105,48 @@ def test_a_failed_database_load_reports_its_cause(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert "RuntimeError" in out
     assert "password authentication failed" in out
+
+
+def test_sqlite_urls_are_recognised_and_the_path_is_exact() -> None:
+    """SQLAlchemy spells absolute paths with four slashes, relative with three.
+
+    Keeping an extra slash makes SQLite read the first path segment as a URI
+    authority and the load fails with "invalid uri authority".
+    """
+    from src.inference.phishtank_loader import _sqlite_path
+
+    assert _sqlite_path("sqlite+aiosqlite:////Users/a/b.db") == "/Users/a/b.db"
+    assert _sqlite_path("sqlite:///relative/c.db") == "relative/c.db"
+    assert _sqlite_path("postgresql+psycopg://u@h/db") is None
+
+
+def test_a_sqlite_data_platform_is_read_directly(tmp_path, monkeypatch) -> None:
+    """The POC runs the data platform on SQLite.
+
+    Without this the only way to get a blocklist locally was to point at a
+    Postgres URL, so development reached for the production database.
+    """
+    import json
+    import sqlite3
+
+    db = tmp_path / "dp.db"
+    conn = sqlite3.connect(db)
+    conn.execute("create table data_raw_record (raw_content text)")
+    conn.executemany(
+        "insert into data_raw_record values (?)",
+        [
+            (json.dumps({"source": "phishtank_api", "url": "http://bad.test/a"}),),
+            (json.dumps({"source": "phishtank_api", "url": "http://bad.test/b/"}),),
+            (json.dumps({"source": "other", "url": "http://ignored.test"}),),
+            ("Objet: not json at all",),  # mailbox export; must not break the query
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    from src.inference import phishtank_loader
+
+    monkeypatch.setenv("SICURRE_DATA_PLATFORM_DATABASE_URL", f"sqlite:///{db}")
+    urls = phishtank_loader._load_phishtank_urls_from_database()
+
+    assert urls == ["http://bad.test/a", "http://bad.test/b"]
