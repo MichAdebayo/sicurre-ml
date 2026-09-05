@@ -72,3 +72,36 @@ def test_get_phishtank_set_returns_empty_when_http_and_file_fallback_fail(
     assert get_phishtank_set() == frozenset()
 
     get_phishtank_set.cache_clear()
+
+def test_the_query_guards_the_json_cast() -> None:
+    """data_raw_record is not all JSON, and one bad row failed the whole query.
+
+    Mailbox exports and dropzone TXT files store raw message text. Postgres may
+    evaluate ``raw_content::jsonb`` before the source filter, so without a guard
+    a single non-JSON row raises and the blocklist silently drops to whatever
+    the fallback file holds - one URL, against 1,153 in the database.
+    """
+    import inspect
+
+    from inference import phishtank_loader
+
+    source = inspect.getsource(phishtank_loader)
+    assert "pg_input_is_valid(raw_content, 'jsonb')" in source
+
+
+def test_a_failed_database_load_reports_its_cause(monkeypatch, capsys) -> None:
+    """A stale credential and an unparseable row looked identical before."""
+    from inference import phishtank_loader
+
+    def _boom() -> list[str]:
+        raise RuntimeError("password authentication failed")
+
+    monkeypatch.setattr(phishtank_loader, "_load_phishtank_urls_from_database", _boom)
+    monkeypatch.setattr(phishtank_loader, "_load_phishtank_urls_from_file", lambda: [])
+    monkeypatch.setenv("PHISHTANK_SOURCE", "database")
+
+    phishtank_loader.load_phishtank_urls()
+
+    out = capsys.readouterr().out
+    assert "RuntimeError" in out
+    assert "password authentication failed" in out

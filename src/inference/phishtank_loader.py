@@ -38,10 +38,16 @@ def _load_phishtank_urls_from_database() -> list[str]:
 
     import psycopg
 
+    # data_raw_record holds more than JSON payloads: operator mailbox exports
+    # and dropzone TXT files store raw message text, which the ::jsonb cast
+    # cannot parse. Postgres may evaluate that cast before the source filter, so
+    # one such row fails the whole query and the blocklist silently falls back
+    # to the file. pg_input_is_valid (PostgreSQL 16+) guards it per row.
     query = """
     select distinct raw_content::jsonb->>'url' as url
     from public.data_raw_record
-    where raw_content::jsonb->>'source' = 'phishtank_api'
+    where pg_input_is_valid(raw_content, 'jsonb')
+      and raw_content::jsonb->>'source' = 'phishtank_api'
       and coalesce(raw_content::jsonb->>'url', '') <> ''
     order by url;
     """
@@ -110,8 +116,14 @@ def load_phishtank_urls() -> list[str]:
             except Exception:
                 print("[phishtank] Fallback write skipped (write_failed).")
             return urls
-        except Exception:
-            print("[phishtank] Database load failed (source_unavailable); using fallback.")
+        except Exception as exc:
+            # The cause matters: a stale credential and a query that cannot parse
+            # a row look identical from here, and both leave the blocklist with
+            # whatever the fallback file happens to hold.
+            print(
+                f"[phishtank] Database load failed ({type(exc).__name__}: "
+                f"{str(exc)[:200]}); using fallback."
+            )
 
     return _load_phishtank_urls_from_file()
 
