@@ -69,3 +69,10 @@ docs/experiments/**
 docs/progress-plan.md
 
 *.png
+
+# Secrets: any local env file, including backups. The tracked *.example files
+# predate these rules, and .gitignore does not affect already-tracked files.
+.env.*
+env.api
+env.auth
+env.alloy
