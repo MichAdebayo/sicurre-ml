@@ -29,8 +29,11 @@ This repo does not:
 
 ## Branch Discipline
 
-- `ml`: notebook-to-module extraction, training code (`src/config`, `src/data`, `src/model`, `src/training`), and tests
-- `mlops`: evaluation, MLflow logging, promotion flows, Kaggle triggers, dataset sync, HF publication
+`feature → mlops → develop → main`. A feature branch merges into `mlops`
+first, `mlops` into `develop`, `develop` into `main`. Never push to `main`.
+CI gates `develop` and `main`; CD deploys from `main`. Releases are cut
+manually by merging the release-please pull request, never as a side effect
+of another change.
 
 ## Working Rules
 
