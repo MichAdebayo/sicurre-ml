@@ -1,10 +1,6 @@
 # Copilot Instructions
 
-Read AGENTS.md first at the start of each session. Then review the current task state in:
-- tasks/todo.md
-- tasks/lessons.md
-- tasks/session-updates.md
-- tasks/agile.md
+Read AGENTS.md first at the start of each session, then `docs/README.md`.
 
 ## Scope
 

@@ -26,7 +26,6 @@ sample_*.md
 *tmp/
 deploy/.env
 deploy/env.alloy
-deploy/README.md
 # Cloudflare Origin CA certs — never commit private keys
 deploy/nginx/ssl/
 *tasks/

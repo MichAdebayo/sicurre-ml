@@ -51,21 +51,20 @@ each stating context, decision, and consequences.
 
 ## Operations
 
-Runbooks live in [ops/](ops/). Reach for these during an incident.
-
-| Runbook | Use when |
-|---------|----------|
-| [HF promotion runbook](ops/hf-promotion-runbook.md) | Moving or verifying the production tag |
-| [Kaggle runbook](ops/kaggle-runbook.md) | A training run needs inspection or restart |
-| [Monitoring](ops/monitoring.md) | Wiring or reading the observability stack |
-| [Inference reliability remediation](ops/inference-reliability-remediation.md) | The service is degraded or failing |
-| [Production readiness hardening](ops/production-readiness-hardening.md) | Pre-release checks |
+Operational runbooks (Kaggle runs, Hugging Face promotion, monitoring wiring,
+inference remediation, release hardening) are kept locally under `docs/ops/`
+and are not tracked. The tracked equivalents are
+[post-deployment validation](architecture/post-deployment-validation.md),
+[deployment identity](architecture/deployment-identity.md) and
+[monitoring design](architecture/monitoring-design.md), plus the workflow
+files under `.github/workflows/`, which are the executable form of each
+procedure.
 
 ## Certification
 
-[simplon/simplon-coverage-checklist.md](simplon/simplon-coverage-checklist.md)
-maps deliverables to competency criteria. Per-competency notes are in
-[report/](report/).
+The competency mapping and per-competency notes are local working documents
+(`docs/simplon/`, `docs/report/`) and are not tracked. The submitted reports
+live in the companion `sicurre` repository's certification folder.
 
 ## Boundaries
 
