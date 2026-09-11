@@ -2,13 +2,8 @@
 
 ## Start Here
 
-At the start of every session, read these files before making changes:
-- `tasks/todo.md`
-- `tasks/lessons.md`
-- `tasks/session-updates.md`
-- `tasks/agile.md`
-
-Use them to get up to speed on current progress, prior mistakes, and the next planned slice of work.
+Read `README.md` and `docs/README.md` before making changes. Working notes
+under `tasks/` are local and not tracked; do not rely on them being present.
 
 ## Repo Role
 
@@ -34,8 +29,11 @@ This repo does not:
 
 ## Branch Discipline
 
-- `ml`: notebook-to-module extraction, training code (`src/config`, `src/data`, `src/model`, `src/training`), and tests
-- `mlops`: evaluation, MLflow logging, promotion flows, Kaggle triggers, dataset sync, HF publication
+`feature → mlops → develop → main`. A feature branch merges into `mlops`
+first, `mlops` into `develop`, `develop` into `main`. Never push to `main`.
+CI gates `develop` and `main`; CD deploys from `main`. Releases are cut
+manually by merging the release-please pull request, never as a side effect
+of another change.
 
 ## Working Rules
 
@@ -45,7 +43,6 @@ This repo does not:
 - Keep changes minimal and aligned with the documented contracts in `docs/`.
 - Keep tests organized only under `tests/unit`, `tests/integration`, and `tests/e2e`.
 - Keep hook definitions in `.github/hooks/` and hook implementations in `.github/scripts/hooks/`.
-- Treat `scripts/hooks/` as compatibility shims only; do not put real hook logic there.
 - ml/ and mlops/ at repo root are notebook and operations containers, not Python packages. All importable Python code lives under src/.
 
 ## Secret Hygiene
@@ -73,4 +70,5 @@ If zero-error checks fail, resolve them before ending the session.
 
 - `docs/model/training-plan.md`
 - `docs/architecture/sync-contracts.md`
-- `docs/ops/kaggle-runbook.md`
+- `docs/architecture/performance.md`
+- `docs/model/promotion-policy.md`
