@@ -249,5 +249,5 @@ uv run uvicorn src.serving.app:app --reload --port 8000
 | Promotion policy | [docs/model/promotion-policy.md](docs/model/promotion-policy.md) |
 | Monitoring design | [docs/architecture/monitoring-design.md](docs/architecture/monitoring-design.md) |
 | Architecture decisions | [docs/adr/](docs/adr/) |
-| Runbooks | [docs/ops/](docs/ops/) |
-| Deployment | [deploy/README.md](deploy/README.md) |
+| Post-deployment validation | [docs/architecture/post-deployment-validation.md](docs/architecture/post-deployment-validation.md) |
+| Delivery workflows | [.github/workflows/](.github/workflows/) |
