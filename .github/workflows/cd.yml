@@ -90,6 +90,11 @@ jobs:
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:${{ steps.tag.outputs.tag }}
             ${{ env.REGISTRY }}/${{ steps.image.outputs.name }}:latest
           cache-from: type=gha,scope=production-image
+          # The base stage applies Debian security upgrades and the runtime stage
+          # is the image that ships. Served from cache, either would keep
+          # yesterday's packages after today's advisories; the dependency
+          # install in the builder stage stays cached.
+          no-cache-filters: secured-base,runtime
           # A full GitHub Actions cache must not turn a valid production image
           # build into a failed deployment.
           cache-to: type=gha,scope=production-image,mode=min,ignore-error=true
