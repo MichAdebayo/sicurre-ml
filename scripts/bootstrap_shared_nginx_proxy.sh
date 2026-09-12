@@ -29,12 +29,12 @@ set -euo pipefail
 #     --cert-key deploy/nginx/ssl/sicurre-origin-key.pem
 #
 # Optional flags:
-#   --host <ip>       Default: 77.42.67.255
+#   --host <ip>       Required: the server public IP or hostname (or set HETZNER_HOST)
 #   --key  <path>     SSH private key (default: ssh agent)
 #   --with-api-vhost  Also install api.sicurre.com.conf into conf.d
 # ─────────────────────────────────────────────────────────────────────────────
 
-HOST="77.42.67.255"
+HOST="${HETZNER_HOST:-}"
 REMOTE_USER=""
 SSH_KEY=""
 CERT_FILE=""
@@ -55,6 +55,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── Validate required arguments ──────────────────────────────────────────────
+if [[ -z "$HOST" ]]; then
+  echo "error: --host <ip-or-hostname> is required (or set HETZNER_HOST)" >&2
+  exit 1
+fi
 if [[ -z "$REMOTE_USER" ]]; then
   echo "ERROR: --user is required."
   echo "Run with --help for usage."
