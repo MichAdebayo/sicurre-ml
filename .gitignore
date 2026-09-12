@@ -75,3 +75,6 @@ docs/progress-plan.md
 env.api
 env.auth
 env.alloy
+
+# Local working notes, never published
+_local/
