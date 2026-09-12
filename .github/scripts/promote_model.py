@@ -73,6 +73,10 @@ def _write_actions_outputs(values: dict[str, str | None]) -> None:
             output.write(f"{key}={value or ''}\n")
 
 
+def _now() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
 def _configure_mlflow() -> Any:
     _required(os.getenv("DATABRICKS_HOST"), "DATABRICKS_HOST")
     _required(os.getenv("DATABRICKS_TOKEN"), "DATABRICKS_TOKEN")
@@ -110,6 +114,40 @@ def _set_version_tags(client: Any, version: str | None, tags: dict[str, str]) ->
             model_version_tag_key(key),
             value,
         )
+
+
+def _describe_version(
+    client: Any,
+    *,
+    version: str | None,
+    run_id: str | None,
+    semantic_version: str | None,
+    state: str,
+    note: str,
+    append: bool = False,
+) -> None:
+    """Make a version's outcome readable where people look for it.
+
+    ``state`` is one of ``production``, ``retired``, ``rejected`` or
+    ``candidate``. It becomes the run name suffix (``model-1.0.30-production``),
+    the ``sicurre.promotion.state`` tag on the run and the version, and the
+    version description carries ``note`` (appended to what is there when
+    ``append`` is set, so a retired version keeps its promotion line).
+    """
+    if not version:
+        return
+    label = semantic_version or f"v{version}"
+    _set_run_tags(
+        client,
+        run_id,
+        {"mlflow.runName": f"model-{label}-{state}", "sicurre.promotion.state": state},
+    )
+    _set_version_tags(client, version, {"sicurre.promotion.state": state})
+    description = note
+    if append:
+        current = getattr(client.get_model_version(MODEL_NAME, version), "description", "") or ""
+        description = f"{current}\n{note}".strip() if current else note
+    client.update_model_version(MODEL_NAME, version, description=description)
 
 
 def _clear_candidate_promotion_tags(
@@ -254,6 +292,18 @@ def _restore_registry(
             snapshot.previous_run_id,
             {"sicurre.model.stage": "production"},
         )
+        _describe_version(
+            client,
+            version=snapshot.previous_model_version,
+            run_id=snapshot.previous_run_id,
+            semantic_version=snapshot.previous_semantic_version,
+            state="production",
+            note=(
+                f"Restored {_now()} after the failed promotion of "
+                f"{snapshot.semantic_version}."
+            ),
+            append=True,
+        )
     else:
         try:
             client.delete_registered_model_alias(snapshot.model_name, "production")
@@ -275,6 +325,15 @@ def _restore_registry(
             client,
             run_id=snapshot.candidate_run_id,
             model_version=snapshot.candidate_model_version,
+        )
+        _describe_version(
+            client,
+            version=snapshot.candidate_model_version,
+            run_id=snapshot.candidate_run_id,
+            semantic_version=snapshot.semantic_version,
+            state="rejected",
+            note=f"Promotion of {snapshot.semantic_version} failed {_now()}; pointers restored.",
+            append=True,
         )
     if snapshot.previous_candidate_alias_version:
         client.set_registered_model_alias(
@@ -334,7 +393,7 @@ def promote(args: argparse.Namespace) -> None:
         }
     )
 
-    promoted_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+    promoted_at = _now()
     candidate_tags = {
         "sicurre.model.semantic_version": semantic_version,
         "sicurre.model.stage": "production",
@@ -362,6 +421,26 @@ def promote(args: argparse.Namespace) -> None:
         if snapshot.previous_model_version != args.candidate_mlflow_model_version:
             _set_version_tags(client, snapshot.previous_model_version, previous_tags)
             _set_run_tags(client, snapshot.previous_run_id, previous_tags)
+            _describe_version(
+                client,
+                version=snapshot.previous_model_version,
+                run_id=snapshot.previous_run_id,
+                semantic_version=snapshot.previous_semantic_version,
+                state="retired",
+                note=f"Retired {promoted_at}, replaced by {semantic_version}.",
+                append=True,
+            )
+        _describe_version(
+            client,
+            version=args.candidate_mlflow_model_version,
+            run_id=args.candidate_mlflow_run_id,
+            semantic_version=semantic_version,
+            state="production",
+            note=(
+                f"Production since {promoted_at}, approved by {args.approved_by}, "
+                f"Hugging Face revision {candidate_revision[:8]}."
+            ),
+        )
         _move_hf_tag(args.hf_repository, candidate_revision, hf_token)
     except Exception:
         _restore_registry(
@@ -375,6 +454,41 @@ def promote(args: argparse.Namespace) -> None:
         f"Verified promotion pointers: {MODEL_NAME} v"
         f"{args.candidate_mlflow_model_version} / {args.hf_repository}@{candidate_revision}"
     )
+
+
+def annotate_production(args: argparse.Namespace) -> None:
+    """Name the current production version from its own promotion tags.
+
+    Idempotent: reads the version behind the ``production`` alias and writes
+    the run name, the state tag and the description a promotion would have
+    written. Used once to catch up versions promoted before this naming.
+    """
+    client = _configure_mlflow()
+    current = _alias_version(client, "production")
+    if not current:
+        raise RuntimeError("No production alias to annotate")
+    tags = current.tags or {}
+    key = model_version_tag_key
+    semantic_version = tags.get(key("sicurre.model.semantic_version"))
+    approved_by = tags.get(key("sicurre.promotion.approved_by")) or "unrecorded"
+    since = (
+        tags.get(key("sicurre.promotion.completed_at"))
+        or tags.get(key("sicurre.promotion.approved_at"))
+        or "an unrecorded date"
+    )
+    revision = tags.get(key("sicurre.model.hf_revision")) or ""
+    _describe_version(
+        client,
+        version=str(current.version),
+        run_id=str(current.run_id) if current.run_id else None,
+        semantic_version=semantic_version,
+        state="production",
+        note=(
+            f"Production since {since}, approved by {approved_by}, "
+            f"Hugging Face revision {revision[:8]}."
+        ),
+    )
+    print(f"Annotated {MODEL_NAME} v{current.version} as production ({semantic_version}).")
 
 
 def rollback(args: argparse.Namespace) -> None:
@@ -441,6 +555,9 @@ def _parser() -> argparse.ArgumentParser:
     promote_parser.add_argument("--approved-at", required=True)
     promote_parser.add_argument("--state-path", required=True)
     promote_parser.set_defaults(handler=promote)
+
+    annotate_parser = commands.add_parser("annotate-production")
+    annotate_parser.set_defaults(handler=annotate_production)
 
     rollback_parser = commands.add_parser("rollback")
     rollback_parser.add_argument("--hf-repository", required=True)
