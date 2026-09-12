@@ -128,6 +128,9 @@ jobs:
           tags: sicurre-ml:ci-check
           # Use GitHub Actions cache to speed up repeated builds
           cache-from: type=gha,scope=ci-image
+          # The base stage applies Debian security upgrades; served from cache it
+          # would keep yesterday's packages after today's advisories.
+          no-cache-filters: secured-base
           # Cache capacity is an optimization, never a correctness gate. Keep
           # only the final-stage cache and continue when GitHub cannot reserve
           # additional cache storage.
