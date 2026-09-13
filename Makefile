@@ -56,7 +56,7 @@ openapi-check:
 	uv run python .github/scripts/generate_openapi.py --check
 
 coverage:
-	XDG_CACHE_HOME=/tmp/sicurre-coverage-cache uv run pytest tests/unit \
+	XDG_CACHE_HOME=/tmp/sicurre-coverage-cache uv run pytest tests/unit tests/integration \
 		--cov=src --cov-branch --cov-report=term-missing --cov-report=json
 	uv run python .github/scripts/check_coverage.py
 
