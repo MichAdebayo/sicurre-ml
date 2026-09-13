@@ -78,3 +78,7 @@ env.alloy
 
 # Local working notes, never published
 _local/
+
+# Coverage reports written at the repository root by CI and make coverage
+coverage.json
+coverage.xml
