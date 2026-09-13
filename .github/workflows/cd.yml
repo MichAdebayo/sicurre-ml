@@ -157,6 +157,18 @@ jobs:
           target: ${{ secrets.DEPLOY_PATH }}
           strip_components: 0
 
+      # The api.sicurre.com vhost is installed into the shared nginx-proxy by the
+      # restart step below, so the live file can never drift from this repo.
+      - name: Copy nginx vhost to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          source: "deploy/nginx/api.sicurre.com.conf"
+          target: ${{ secrets.DEPLOY_PATH }}
+          strip_components: 0
+
       - name: Pull image and restart containers
         uses: appleboy/ssh-action@v1
         with:
@@ -292,6 +304,33 @@ jobs:
               echo "ML-owned Alloy failed to remain running after configuration reload." >&2
               docker compose -f docker-compose.prod.yml ps alloy >&2
               docker compose -f docker-compose.prod.yml logs --tail=150 alloy >&2
+              exit 1
+            fi
+
+            # Install the api.sicurre.com vhost into the shared nginx-proxy. The
+            # previous copy is kept until nginx accepts the new one and restored if
+            # it does not, so a rejected file never outlives this step.
+            docker run --rm \
+              -v /opt/nginx-proxy/conf.d:/target \
+              -v "${{ secrets.DEPLOY_PATH }}/deploy/nginx/api.sicurre.com.conf:/src/api.sicurre.com.conf:ro" \
+              alpine sh -c 'set -e; if [ -f /target/api.sicurre.com.conf ]; then cp -p /target/api.sicurre.com.conf /target/.api.sicurre.com.conf.previous; else rm -f /target/.api.sicurre.com.conf.previous; fi; cp /src/api.sicurre.com.conf /target/api.sicurre.com.conf'
+            if docker exec nginx-proxy nginx -t; then
+              docker exec nginx-proxy nginx -s reload
+              docker run --rm -v /opt/nginx-proxy/conf.d:/target alpine rm -f /target/.api.sicurre.com.conf.previous
+            else
+              docker run --rm -v /opt/nginx-proxy/conf.d:/target \
+                alpine sh -c 'if [ -f /target/.api.sicurre.com.conf.previous ]; then mv /target/.api.sicurre.com.conf.previous /target/api.sicurre.com.conf; else rm -f /target/api.sicurre.com.conf; fi'
+              docker exec nginx-proxy nginx -t
+              echo "nginx rejected api.sicurre.com.conf; the previous vhost was restored" >&2
+              exit 1
+            fi
+            # The public health path still reaches the service through nginx, and
+            # any other path, such as a scanner's /.env, stops there with a 404.
+            sleep 2
+            health_status=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 --resolve api.sicurre.com:443:127.0.0.1 https://api.sicurre.com/v1/health || true)
+            probe_status=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 10 --resolve api.sicurre.com:443:127.0.0.1 https://api.sicurre.com/.env || true)
+            if [ "$health_status" != "200" ] || [ "$probe_status" != "404" ]; then
+              echo "api.sicurre.com through nginx: /v1/health ${health_status}, /.env ${probe_status}; expected 200 and 404" >&2
               exit 1
             fi
 

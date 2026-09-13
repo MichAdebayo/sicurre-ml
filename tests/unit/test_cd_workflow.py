@@ -275,3 +275,34 @@ def test_observability_smoke_forces_privacy_safe_trace_and_auth_log() -> None:
     assert "Request(" in validator
     assert "telemetry_delivery_validation" in validator
     assert "loki_source_docker_target_entries_total" in validator
+
+
+
+def test_cd_installs_the_api_vhost_and_reloads_nginx_only_when_it_is_valid() -> None:
+    """The live vhost must match the repository; a rejected file is restored."""
+    workflow = Path(".github/workflows/cd.yml").read_text()
+    assert 'source: "deploy/nginx/api.sicurre.com.conf"' in workflow
+    install = workflow.index("cp /src/api.sicurre.com.conf /target/api.sicurre.com.conf")
+    test = workflow.index("if docker exec nginx-proxy nginx -t; then", install)
+    reload = workflow.index("docker exec nginx-proxy nginx -s reload", test)
+    restore = workflow.index(
+        "mv /target/.api.sicurre.com.conf.previous /target/api.sicurre.com.conf", reload
+    )
+    assert install < test < reload < restore
+    assert "https://api.sicurre.com/.env" in workflow
+    assert '[ "$probe_status" != "404" ]' in workflow
+
+
+def test_the_api_vhost_forwards_only_the_public_paths() -> None:
+    vhost = Path("deploy/nginx/api.sicurre.com.conf").read_text()
+    forwarded = [line.strip() for line in vhost.splitlines() if line.strip().startswith("location")]
+    assert forwarded[:5] == [
+        "location = /v1/classify {",
+        "location @rate_limited {",
+        "location = /v1/health {",
+        "location = /health {",
+        "location = /v1/ready {",
+    ]
+    catch_all = vhost[vhost.index("    location / {"):]
+    assert catch_all.split("}", 1)[0].strip().endswith("return 404;")
+    assert "http2 on;" in vhost and "listen 443 ssl http2" not in vhost
