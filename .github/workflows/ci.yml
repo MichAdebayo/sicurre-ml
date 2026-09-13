@@ -81,9 +81,9 @@ jobs:
       - name: Verify generated OpenAPI contract
         run: uv run python .github/scripts/generate_openapi.py --check
 
-      - name: Run unit tests with branch reporting
+      - name: Run unit and integration tests with branch reporting
         run: |
-          uv run pytest tests/unit \
+          uv run pytest tests/unit tests/integration \
             --cov=src \
             --cov-branch \
             --cov-report=xml \
