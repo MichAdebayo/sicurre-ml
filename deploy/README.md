@@ -145,25 +145,16 @@ reboots and container restarts.
 
 ## 6. Copy server-side config files — AUTOMATED
 
-`deploy/alloy/config.alloy` and `deploy/nginx/api.sicurre.com.conf` are now
-committed to the repository. The CD workflow copies them to the server
-automatically on every deploy. **No manual `scp` step needed.**
+`deploy/alloy/config.alloy` and `deploy/nginx/api.sicurre.com.conf` are
+committed to the repository, and CD copies both to the server on every deploy.
+**No manual step is needed.**
 
-The only one-time manual action required is installing the nginx vhost on the
-host nginx instance (whichever nginx container serves traffic). Do this once
-after the first deploy:
-
-```bash
-# As admin on the server, find where the host nginx reads its vhosts from:
-ssh -i ~/.ssh/sicurre_ml_deploy_key sicurre-ml-prod@<server-ip>
-# Then, as admin / sudo:
-sudo cp ~/sicurre-ml/deploy/nginx/api.sicurre.com.conf \
-  /path/to/nginx/conf.d/api.sicurre.com.conf
-sudo nginx -t && sudo nginx -s reload
-```
-
-> After the first install, nginx config updates are deployed automatically
-> by CD — but nginx must be reloaded separately if the vhost file changes.
+CD installs the vhost into the shared `nginx-proxy` container's
+`/opt/nginx-proxy/conf.d`, runs `nginx -t`, and reloads only if the test
+passes; otherwise it restores the previous file and fails the deploy. It then
+checks through nginx that `/v1/health` answers 200 and that an unknown path
+such as `/.env` answers 404. Until 13 September 2026 the vhost had not been
+installed since 1 June, and the live copy forwarded every path to the service.
 
 ---
 
